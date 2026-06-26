@@ -1,0 +1,205 @@
+- - - - - - - - 
+- - - XYXY- - - 
+- - - XYXYXY- - 
+- - - XY- XYXY- 
+XY- - XY- - XYXY
+XYXY- XY- XYXY- 
+- XYXYXYXYXY- - 
+- - XYXYXY- - - 
+- - XYXYXY- - - 
+- XYXYXYXYXY- - 
+XYXY- XY- XYXY- 
+XY- - XY- - XYXY
+- - - XY- XYXY- 
+- - - XYXYXY- - 
+- - - XYXY- - - 
+- - - - - - - - 
+
+0x00
+0x18
+0x1C
+0x16
+0x93
+0xD6
+0x7C
+0x38
+0x38
+0x7C
+0xD6
+0x93
+0x16
+0x1C
+0x18
+0x00
+
+
+
+- - - - - - - - 
+- - - XYXY- - - 
+- - - XY- XY- - 
+- - - XY- - - XY
+XY- - XY- - XYXY
+XYXY- - - XYXY- 
+- - - - XYXY- - 
+- - - XYXY- - - 
+- - XYXY- - - - 
+- XYXY- - - - - 
+XYXY- - - XYXY- 
+XY- - - - - XYXY
+- - - XY- XYXY- 
+- - - XYXYXY- - 
+- - - XYXY- - - 
+- - - - - - - - 
+
+
+0x00
+0x18
+0x14
+0x11
+0x93
+0xC6
+0x0C
+0x18
+0x30
+0x60
+0xC6
+0x83
+0x16
+0x1C
+0x18
+0x00
+
+
+- - - XYXY- - - 
+- - - XY- XY- - 
+- - - XY- - XY- 
+- XY- XY- XY- - 
+- - XYXYXY- - - 
+- - - XYXY- - - 
+- - XYXY- XY- - 
+- XY- XY- - XY- 
+- - - XY- XY- - 
+- - - XYXY- - - 
+
+
+
+0x18
+0x14
+0x12
+0x54
+0x38
+0x18
+0x34
+0x52
+0x14
+0x18
+
+- - - XYXY- - - 
+- - - XY- XY- XY
+- - - XY- - XY- 
+- XY- XY- XY- - 
+- - - - XY- - - 
+- - - XY- - - - 
+- - XY- - XY- - 
+- XY- - - - XY- 
+XY- - XY- XY- - 
+- - - XYXY- - - 
+
+
+0x18
+0x15
+0x12
+0x54
+0x08
+0x10
+0x24
+0x42
+0x94
+0x18
+
+
+
+
+
+
+- - XYXYXYXY- - 
+- XY- XY- - XY- 
+XY- - XY- - - XY
+XY- - XY- - - XY
+XY- - XYXYXY- XY
+XY- - - - - - XY
+- XY- - - - XY- 
+- - XYXYXYXY- - 
+
+0x3C
+0x52
+0x91
+0x91
+0x9D
+0x81
+0x42
+0x3C
+
+
+- - - XYXYXYXY- 
+- - XY- - - XY- 
+- XY- - - - XY- 
+- XY- - - - XY- 
+- XY- - - - XY- 
+- XY- - - - XY- 
+- XY- - - - XY- 
+- XYXYXYXYXYXY- 
+
+
+0x1E
+0x22
+0x42
+0x42
+0x42
+0x42
+0x42
+0x7E
+
+- - - - - - - - 
+- - - - XYXY- - 
+- XY- - - - XY- 
+- - XY- - XY- - 
+- XY- - - - XY- 
+- - XY- - XY- - 
+- XY- - - - XY- 
+- - XYXY- - - - 
+
+
+0x00
+0x0C
+0x42
+0x24
+0x42
+0x24
+0x42
+0x30
+
+
+- - - - - - - - 
+- - XYXYXYXY- - 
+- - XY- - XY- - 
+- - XY- - XY- - 
+- XYXYXYXYXYXY- 
+XY- - - - - - XY
+XYXY- XYXY- XYXY
+- - - - - - - - 
+
+
+
+0x00
+0x3C
+0x24
+0x24
+0x7E
+0x81
+0xDB
+0x00
+
+
+
+

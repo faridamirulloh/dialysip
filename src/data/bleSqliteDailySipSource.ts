@@ -1,0 +1,302 @@
+import { DailySipBleClient } from "../ble/dailySipBleClient";
+import { isRegisteredDeviceId, SqliteDailySipStore } from "./sqliteDailySipStore";
+import type { SyncedDeviceRecord } from "./syncTypes";
+import type {
+  BleActivity,
+  DailySipDataSource,
+  DailySipSettings,
+  DailySipSnapshot,
+  ManualIntakeInput
+} from "./types";
+
+export class BleSqliteDailySipSource implements DailySipDataSource {
+  private readonly store = new SqliteDailySipStore();
+  private readonly ble = new DailySipBleClient();
+  private liveSnapshotListener?: (snapshot: DailySipSnapshot) => void;
+  private bleActivityListener?: (activity: BleActivity) => void;
+  private liveSyncUnsubscribe?: () => void;
+  private liveSyncStarting?: Promise<void>;
+  private historySyncInProgress = false;
+
+  constructor() {
+    this.ble.setDisconnectListener(() => {
+      void this.handleBleDisconnect();
+    });
+    this.ble.setActivityListener((activity) => {
+      this.bleActivityListener?.(activity);
+    });
+  }
+
+  async loadSnapshot(): Promise<DailySipSnapshot> {
+    return this.store.loadSnapshot();
+  }
+
+  subscribeToLiveSync(onSnapshot: (snapshot: DailySipSnapshot) => void) {
+    this.liveSnapshotListener = onSnapshot;
+    return () => {
+      if (this.liveSnapshotListener === onSnapshot) {
+        this.liveSnapshotListener = undefined;
+      }
+    };
+  }
+
+  subscribeToBleActivity(onActivity: (activity: BleActivity) => void) {
+    this.bleActivityListener = onActivity;
+    return () => {
+      if (this.bleActivityListener === onActivity) {
+        this.bleActivityListener = undefined;
+      }
+    };
+  }
+
+  async autoConnectActiveDevice(): Promise<DailySipSnapshot | null> {
+    const snapshot = await this.store.loadSnapshot();
+    if (!isRegisteredDeviceId(snapshot.device.deviceId)) {
+      return null;
+    }
+
+    const expectedDeviceId = snapshot.device.deviceId;
+
+    try {
+      const connection = await this.ble.connectToBottle(expectedDeviceId);
+      const connectedSnapshot = await this.store.applyBleStatus(connection.status);
+      this.publishSnapshot(connectedSnapshot);
+      const syncedSnapshot = await this.syncConnectedDevice();
+      void this.ensureLiveSyncMonitor();
+      return syncedSnapshot ?? connectedSnapshot;
+    } catch {
+      return null;
+    }
+  }
+
+  async connectDevice(): Promise<DailySipSnapshot> {
+    try {
+      const connection = await this.ble.connectToBottle();
+      const connectedSnapshot = await this.store.applyBleConnection(connection);
+      this.publishSnapshot(connectedSnapshot);
+      const syncedSnapshot = await this.syncConnectedDevice();
+      void this.ensureLiveSyncMonitor();
+      if (syncedSnapshot) {
+        return syncedSnapshot;
+      }
+      return this.store.applyBleStatus(
+        connection.status,
+        "Terhubung ke botol. Riwayat belum berhasil diambil; tekan Sinkron riwayat."
+      );
+    } catch (caught) {
+      return this.store.recordBleError(getErrorMessage(caught));
+    }
+  }
+
+  async syncNow(): Promise<DailySipSnapshot> {
+    try {
+      const snapshot = await this.store.loadSnapshot();
+      const result = await this.syncHistory(snapshot);
+      const nextSnapshot = await this.store.applyBleSync(result);
+      void this.ensureLiveSyncMonitor();
+      return nextSnapshot;
+    } catch (caught) {
+      const message = getErrorMessage(caught);
+      const connectedSnapshot = await this.applySyncErrorIfStillConnected(message);
+      return connectedSnapshot ?? this.store.recordBleError(message);
+    }
+  }
+
+  async startCalibration(): Promise<DailySipSnapshot> {
+    try {
+      await this.ble.sendCommand("start_calibration");
+      const status = await this.ble.readDeviceStatus();
+      return this.store.applyBleStatus(status, "Mode kalibrasi dimulai. Ikuti bacaan berat di botol.");
+    } catch (caught) {
+      return this.store.recordBleError(getErrorMessage(caught));
+    }
+  }
+
+  async refreshDeviceStatus(): Promise<DailySipSnapshot> {
+    try {
+      const status = await this.ble.readDeviceStatus();
+      return this.store.applyBleStatus(status);
+    } catch (caught) {
+      return this.store.recordBleError(getErrorMessage(caught));
+    }
+  }
+
+  async saveTare(): Promise<DailySipSnapshot> {
+    try {
+      await this.ble.sendCommand("tare");
+      const status = await this.ble.readDeviceStatus();
+      await this.store.recordPendingBleCommand("tare", {}, "Perintah tare dikirim ke botol.");
+      return this.store.applyBleStatus(status, "Perintah tare dikirim ke botol.");
+    } catch (caught) {
+      return this.store.recordBleError(getErrorMessage(caught));
+    }
+  }
+
+  async confirmCalibrationAmount(amountMl: number): Promise<DailySipSnapshot> {
+    try {
+      await this.ble.sendCommand("finish_calibration", { known_amount_ml: amountMl });
+      const status = await this.ble.readDeviceStatus();
+      return this.store.confirmCalibrationAmount(amountMl, status);
+    } catch (caught) {
+      return this.store.recordBleError(getErrorMessage(caught));
+    }
+  }
+
+  async finishCalibration(): Promise<DailySipSnapshot> {
+    try {
+      await this.ble.sendCommand("finish_calibration");
+      const status = await this.ble.readDeviceStatus();
+      return this.store.applyBleStatus(status, "Mode kalibrasi selesai.");
+    } catch (caught) {
+      return this.store.recordBleError(getErrorMessage(caught));
+    }
+  }
+
+  async addManualIntake(input: ManualIntakeInput): Promise<DailySipSnapshot> {
+    return this.store.addManualIntake(input);
+  }
+
+  async deleteHistoryForDate(dateKey: string): Promise<DailySipSnapshot> {
+    return this.store.deleteHistoryForDate(dateKey);
+  }
+
+  async deleteAllHistory(): Promise<DailySipSnapshot> {
+    return this.store.deleteAllHistory();
+  }
+
+  async renameDevice(name: string): Promise<DailySipSnapshot> {
+    return this.store.renameDevice(name);
+  }
+
+  async removeDevice(): Promise<DailySipSnapshot> {
+    this.clearLiveSyncMonitor();
+    try {
+      await this.ble.disconnect();
+    } catch {
+      // Local removal still succeeds if the phone has already dropped the BLE link.
+    }
+    const snapshot = await this.store.removeDevice();
+    this.publishSnapshot(snapshot);
+    return snapshot;
+  }
+
+  async updateSettings(settings: DailySipSettings): Promise<DailySipSnapshot> {
+    return this.store.updateSettings(settings);
+  }
+
+  private async syncConnectedDevice(): Promise<DailySipSnapshot | null> {
+    try {
+      const snapshot = await this.store.loadSnapshot();
+      const result = await this.syncHistory(snapshot);
+      return this.store.applyBleSync(result);
+    } catch {
+      return null;
+    }
+  }
+
+  private async syncHistory(snapshot: DailySipSnapshot) {
+    if (this.historySyncInProgress) {
+      throw new Error("DialySip history sync is already in progress.");
+    }
+
+    const afterRecordId =
+      snapshot.settings.historySyncMode === "full" ? "" : snapshot.device.lastRecordId;
+
+    this.historySyncInProgress = true;
+    try {
+      return await this.ble.sync(afterRecordId, {
+        ...snapshot.settings,
+        overLimitThresholdPercent: 100
+      });
+    } finally {
+      this.historySyncInProgress = false;
+    }
+  }
+
+  private async ensureLiveSyncMonitor() {
+    if (this.liveSyncUnsubscribe || this.liveSyncStarting) {
+      return this.liveSyncStarting;
+    }
+
+    this.liveSyncStarting = this.ble.monitorLiveRecords(
+      (records) => {
+        void this.applyLiveRecords(records).catch(() => undefined);
+      },
+      () => {
+        this.clearLiveSyncMonitor();
+      }
+    )
+      .then((subscription) => {
+        this.liveSyncUnsubscribe = () => subscription.remove();
+      })
+      .catch(() => {
+        this.clearLiveSyncMonitor();
+      })
+      .finally(() => {
+        this.liveSyncStarting = undefined;
+      });
+
+    return this.liveSyncStarting;
+  }
+
+  private async applyLiveRecords(records: SyncedDeviceRecord[]) {
+    if (this.historySyncInProgress || records.length === 0) {
+      return;
+    }
+
+    const status = await this.ble.readDeviceStatus();
+    const acknowledgedRecordId = records[records.length - 1]?.recordId ?? status.lastRecordId;
+    const snapshot = await this.store.applyBleSync({
+      status,
+      records,
+      acknowledgedRecordId
+    });
+
+    if (acknowledgedRecordId) {
+      await this.ble.acknowledgeRecord(acknowledgedRecordId);
+    }
+
+    this.liveSnapshotListener?.(snapshot);
+  }
+
+  private async applySyncErrorIfStillConnected(message: string): Promise<DailySipSnapshot | null> {
+    try {
+      const status = await this.ble.readConnectedDeviceStatus();
+      if (!status) {
+        return null;
+      }
+
+      const snapshot = await this.store.applyBleStatus(
+        status,
+        `Riwayat belum berhasil diambil dari botol: ${message}`
+      );
+      this.publishSnapshot(snapshot);
+      return snapshot;
+    } catch {
+      return null;
+    }
+  }
+
+  private async handleBleDisconnect() {
+    this.clearLiveSyncMonitor();
+
+    try {
+      const snapshot = await this.store.markBleOffline();
+      this.publishSnapshot(snapshot);
+    } catch {
+      // Snapshot refresh failures should not crash BLE disconnect handling.
+    }
+  }
+
+  private publishSnapshot(snapshot: DailySipSnapshot) {
+    this.liveSnapshotListener?.(snapshot);
+  }
+
+  private clearLiveSyncMonitor() {
+    this.liveSyncUnsubscribe?.();
+    this.liveSyncUnsubscribe = undefined;
+  }
+}
+
+const getErrorMessage = (caught: unknown) =>
+  caught instanceof Error ? caught.message : "Tindakan BLE DialySip gagal.";

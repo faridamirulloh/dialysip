@@ -1,0 +1,18 @@
+Starting project at C:\LocalDocuments\Projects\Ari\daily-sip
+Metro is running in CI mode, reloads are disabled. Remove CI=true to enable watch mode.
+Starting Metro Bundler
+warning: Bundler cache is empty, rebuilding (this may take a minute)
+Waiting on http://localhost:8081
+Logs for your project will appear below.
+Android .\index.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Android .\index.js ▓▓▓▓░░░░░░░░░░░░ 30.1% (28/51)
+Android .\index.js ▓▓▓▓▓▓▓▓▓▓▓░░░░░ 74.7% (344/483)
+Android .\index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.7% (792/808)
+Android Bundled 12419ms index.js (878 modules)
+Android Bundled 556ms node_modules\.pnpm\expo-sqlite@15.2.14_expo@53_4fe7f4f4720d77572d0b69a682111038\node_modules\expo-sqlite\build\index.js (680 modules)
+Android .\index.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Android Bundled 164ms index.js (1 module)
+Android Bundled 70ms node_modules\.pnpm\expo-sqlite@15.2.14_expo@53_4fe7f4f4720d77572d0b69a682111038\node_modules\expo-sqlite\build\index.js (1 module)
+Android .\index.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Android Bundled 85ms index.js (1 module)
+Android Bundled 38ms node_modules\.pnpm\expo-sqlite@15.2.14_expo@53_4fe7f4f4720d77572d0b69a682111038\node_modules\expo-sqlite\build\index.js (1 module)

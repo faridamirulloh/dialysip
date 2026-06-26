@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "DialySip",
+    "slug": "dialysip",
+    "scheme": "dialysip",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "icon": "./assets/dialysip-app-icon.png",
+    "splash": {
+      "image": "./assets/dialysip-splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "android": {
+      "package": "com.dialysip.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/dialysip-app-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "permissions": ["BLUETOOTH_SCAN", "BLUETOOTH_CONNECT", "ACCESS_FINE_LOCATION"]
+    },
+    "plugins": [
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "bluetoothAlwaysPermission": false
+        }
+      ]
+    ]
+  }
+}
