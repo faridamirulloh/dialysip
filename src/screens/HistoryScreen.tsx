@@ -22,11 +22,20 @@ import {
 interface HistoryScreenProps {
   snapshot: DailySipSnapshot;
   copy: AppCopy;
+  onRefresh: () => void;
+  onSync: () => void;
   onDeleteDate: (dateKey: string) => void;
   onDeleteAllHistory: () => void;
 }
 
-export function HistoryScreen({ snapshot, copy, onDeleteDate, onDeleteAllHistory }: HistoryScreenProps) {
+export function HistoryScreen({
+  snapshot,
+  copy,
+  onRefresh,
+  onSync,
+  onDeleteDate,
+  onDeleteAllHistory
+}: HistoryScreenProps) {
   const [range, setRange] = useState<HistoryRange>("weekly");
   const [periodIndex, setPeriodIndex] = useState(0);
   const [selectedBarIndex, setSelectedBarIndex] = useState<number | null>(null);
@@ -117,6 +126,10 @@ export function HistoryScreen({ snapshot, copy, onDeleteDate, onDeleteAllHistory
             </Pressable>
           );
         })}
+      </View>
+      <View style={styles.historyToolbar}>
+        <SecondaryButton label={copy.refreshHistory} icon="refresh-outline" onPress={onRefresh} />
+        <SecondaryButton label={copy.syncNow} icon="sync-outline" onPress={onSync} />
       </View>
       <View style={styles.periodSelector}>
         <IconButton
@@ -223,40 +236,6 @@ export function HistoryScreen({ snapshot, copy, onDeleteDate, onDeleteAllHistory
         <MetricCard label={copy.auto} value={`${period.autoMl} ml`} />
         <MetricCard label={copy.manual} value={`${period.manualMl} ml`} />
       </View>
-      <View style={styles.historyActionPanel}>
-        <Text style={styles.panelTitle}>{copy.historyActions}</Text>
-        <Text style={styles.panelBody}>{copy.deleteSelectedDateHint}</Text>
-        <TextInput
-          value={deleteDateText}
-          onChangeText={(value) => {
-            setDeleteDateText(value);
-            setPendingDelete(null);
-          }}
-          placeholder="YYYY-MM-DD"
-          placeholderTextColor={palette.muted}
-          style={[styles.dateInput, !deleteDateIsValid && styles.dateInputInvalid]}
-          accessibilityLabel={copy.historyDateA11y}
-          autoCapitalize="none"
-        />
-        <Text style={[styles.dateHint, !deleteDateIsValid && styles.dateHintInvalid]}>
-          {deleteDateIsValid ? copy.historyDateHint : copy.invalidHistoryDate}
-        </Text>
-        <Text style={styles.panelBody}>{copy.deleteAllHistoryHint}</Text>
-        <View style={styles.actionRow}>
-          <SecondaryButton
-            label={pendingDelete === "date" ? copy.confirmDeleteSelectedDate : copy.deleteSelectedDate}
-            icon="trash-outline"
-            onPress={handleDeleteDate}
-            disabled={!deleteDateIsValid}
-          />
-          <PrimaryButton
-            label={pendingDelete === "all" ? copy.confirmDeleteAllHistory : copy.deleteAllHistory}
-            icon="trash-bin-outline"
-            tone="danger"
-            onPress={handleDeleteAllHistory}
-          />
-        </View>
-      </View>
       <View style={styles.timeline}>
         {period.records.slice(0, 5).map((record) => {
           const localizedRecord = localizeRecord(record, language);
@@ -290,6 +269,40 @@ export function HistoryScreen({ snapshot, copy, onDeleteDate, onDeleteAllHistory
             </Text>
           </View>
         )}
+      </View>
+      <View style={styles.historyActionPanel}>
+        <Text style={styles.panelTitle}>{copy.historyActions}</Text>
+        <Text style={styles.panelBody}>{copy.deleteSelectedDateHint}</Text>
+        <TextInput
+          value={deleteDateText}
+          onChangeText={(value) => {
+            setDeleteDateText(value);
+            setPendingDelete(null);
+          }}
+          placeholder="YYYY-MM-DD"
+          placeholderTextColor={palette.muted}
+          style={[styles.dateInput, !deleteDateIsValid && styles.dateInputInvalid]}
+          accessibilityLabel={copy.historyDateA11y}
+          autoCapitalize="none"
+        />
+        <Text style={[styles.dateHint, !deleteDateIsValid && styles.dateHintInvalid]}>
+          {deleteDateIsValid ? copy.historyDateHint : copy.invalidHistoryDate}
+        </Text>
+        <Text style={styles.panelBody}>{copy.deleteAllHistoryHint}</Text>
+        <View style={styles.actionRow}>
+          <SecondaryButton
+            label={pendingDelete === "date" ? copy.confirmDeleteSelectedDate : copy.deleteSelectedDate}
+            icon="trash-outline"
+            onPress={handleDeleteDate}
+            disabled={!deleteDateIsValid}
+          />
+          <PrimaryButton
+            label={pendingDelete === "all" ? copy.confirmDeleteAllHistory : copy.deleteAllHistory}
+            icon="trash-bin-outline"
+            tone="danger"
+            onPress={handleDeleteAllHistory}
+          />
+        </View>
       </View>
     </ScreenCard>
   );

@@ -138,6 +138,7 @@ export const useDailySipData = () => {
     clearBleLog,
     isBusy,
     error,
+    refreshSnapshot: () => run(() => sourceRef.current.loadSnapshot()),
     connectDevice: () => run(() => sourceRef.current.connectDevice()),
     syncNow: () => run(() => sourceRef.current.syncNow()),
     startCalibration: () => run(() => sourceRef.current.startCalibration()),

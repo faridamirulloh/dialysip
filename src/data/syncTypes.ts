@@ -39,6 +39,7 @@ export interface BleSyncResult {
   status: SyncedDeviceStatus;
   records: SyncedDeviceRecord[];
   acknowledgedRecordId: string;
+  warning?: string;
 }
 
 export interface PendingDeviceSettings extends DailySipSettings {

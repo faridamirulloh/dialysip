@@ -43,6 +43,7 @@ export interface DailySipBleLogPayload {
   sync_complete?: boolean;
   records_sent?: number;
   sync_error?: string;
+  sync_warning?: string;
   records?: Array<{
     record_id: string | number;
     timestamp_utc: number;

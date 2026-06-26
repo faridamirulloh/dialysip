@@ -318,11 +318,12 @@ export class SqliteDailySipStore {
       records_received: result.records.length,
       records_inserted: insertedRecords
     });
-    this.notice = insertedRecords
+    const syncNotice = insertedRecords
       ? `Data riwayat berhasil diambil dari botol. ${insertedRecords} catatan baru disimpan dari ${result.records.length} diterima.`
       : result.records.length
         ? `Data riwayat berhasil diambil dari botol. ${result.records.length} catatan diterima, semuanya sudah ada.`
       : "Data riwayat berhasil diambil dari botol. Tidak ada catatan baru.";
+    this.notice = result.warning ? `${syncNotice} ${result.warning}` : syncNotice;
     return this.buildSnapshot(db);
   }
 

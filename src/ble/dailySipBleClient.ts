@@ -94,7 +94,8 @@ export class DailySipBleClient {
   async sync(
     afterRecordId: string,
     settings: PendingDeviceSettings,
-    historyMode: "full" | "after_last_sync"
+    historyMode: "full" | "after_last_sync",
+    fallbackStatus?: BleSyncResult["status"]
   ): Promise<BleSyncResult> {
     const device = await this.ensureConnected();
     await device.discoverAllServicesAndCharacteristics();
@@ -116,18 +117,43 @@ export class DailySipBleClient {
       throw caught;
     }
 
-    const status = await this.readStatus();
     const records = toSyncedDeviceRecords(logPayload);
     const acknowledgedRecordId = records.length > 0 ? records[records.length - 1].recordId : afterRecordId;
+    let status: BleSyncResult["status"];
+    let warning = typeof logPayload.sync_warning === "string" ? logPayload.sync_warning : undefined;
+
+    try {
+      status = await this.readStatus();
+    } catch (caught) {
+      if (!fallbackStatus || records.length === 0) {
+        throw caught;
+      }
+
+      warning = appendWarning(
+        warning,
+        `Status akhir BLE gagal dibaca setelah riwayat diterima: ${getErrorMessage(caught)}`
+      );
+      status = {
+        ...fallbackStatus,
+        connection: "connected",
+        lastRecordId: records[records.length - 1]?.recordId ?? fallbackStatus.lastRecordId,
+        lastSyncId: acknowledgedRecordId
+      };
+    }
 
     if (acknowledgedRecordId && acknowledgedRecordId !== afterRecordId) {
-      await this.writeAck(acknowledgedRecordId);
+      try {
+        await this.writeAck(acknowledgedRecordId);
+      } catch (caught) {
+        warning = appendWarning(warning, `ACK gagal dikirim: ${getErrorMessage(caught)}`);
+      }
     }
 
     return {
       status,
       records,
-      acknowledgedRecordId
+      acknowledgedRecordId,
+      warning
     };
   }
 
@@ -342,14 +368,14 @@ export class DailySipBleClient {
     };
 
     const result = new Promise<DailySipBleLogPayload>((resolve, reject) => {
-      const finish = () => {
+      const finish = (syncWarning?: string) => {
         if (settled) {
           return;
         }
 
         settled = true;
         cleanup();
-        resolve({ records });
+        resolve(syncWarning ? { records, sync_warning: syncWarning } : { records });
       };
 
       const fail = (error: unknown) => {
@@ -370,6 +396,13 @@ export class DailySipBleClient {
         idleTimeoutId = setTimeout(
           () => {
             if (requiresExplicitCompletion) {
+              if (records.length > 0) {
+                finish(
+                  "sync_complete tidak diterima, tetapi catatan riwayat yang sudah diterima tetap disimpan."
+                );
+                return;
+              }
+
               fail(new Error("DialySip history stream ended before sync_complete."));
               return;
             }
@@ -661,6 +694,12 @@ const isDailySipDevice = (device: Device) => {
 const wait = async (durationMs: number) => {
   await new Promise((resolve) => setTimeout(resolve, durationMs));
 };
+
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : "Unknown BLE error.";
+
+const appendWarning = (current: string | undefined, next: string) =>
+  current ? `${current} ${next}` : next;
 
 type DailySipBleLogRecordPayload = NonNullable<DailySipBleLogPayload["records"]>[number];
 

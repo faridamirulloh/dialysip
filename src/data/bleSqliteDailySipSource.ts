@@ -1,6 +1,6 @@
 import { DailySipBleClient } from "../ble/dailySipBleClient";
 import { isRegisteredDeviceId, SqliteDailySipStore } from "./sqliteDailySipStore";
-import type { SyncedDeviceRecord } from "./syncTypes";
+import type { SyncedDeviceRecord, SyncedDeviceStatus } from "./syncTypes";
 import type {
   BleActivity,
   BleLogEntry,
@@ -18,7 +18,7 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
   private bleLogListener?: (entry: BleLogEntry) => void;
   private liveSyncUnsubscribe?: () => void;
   private liveSyncStarting?: Promise<void>;
-  private historySyncInProgress = false;
+  private historySyncInProgress?: Promise<Awaited<ReturnType<DailySipBleClient["sync"]>>>;
   private lastAutoConnectError?: string;
   private appActive = false;
 
@@ -221,7 +221,9 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
     try {
       const snapshot = await this.store.loadSnapshot();
       const result = await this.syncHistory(snapshot);
-      return this.store.applyBleSync(result);
+      const syncedSnapshot = await this.store.applyBleSync(result);
+      this.publishSnapshot(syncedSnapshot);
+      return syncedSnapshot;
     } catch {
       return null;
     }
@@ -229,25 +231,30 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
 
   private async syncHistory(snapshot: DailySipSnapshot) {
     if (this.historySyncInProgress) {
-      throw new Error("DialySip history sync is already in progress.");
+      return this.historySyncInProgress;
     }
 
     const historyMode = snapshot.settings.historySyncMode;
     const afterRecordId = historyMode === "full" ? "" : snapshot.device.lastRecordId;
 
-    this.historySyncInProgress = true;
-    try {
-      return await this.ble.sync(
+    const syncPromise = this.ble
+      .sync(
         afterRecordId,
         {
           ...snapshot.settings,
           overLimitThresholdPercent: 100
         },
-        historyMode
-      );
-    } finally {
-      this.historySyncInProgress = false;
-    }
+        historyMode,
+        toFallbackStatus(snapshot)
+      )
+      .finally(() => {
+        if (this.historySyncInProgress === syncPromise) {
+          this.historySyncInProgress = undefined;
+        }
+      });
+
+    this.historySyncInProgress = syncPromise;
+    return syncPromise;
   }
 
   private async ensureLiveSyncMonitor() {
@@ -281,7 +288,7 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
   }
 
   private async applyLiveRecords(records: SyncedDeviceRecord[]) {
-    if (!this.appActive || this.historySyncInProgress || records.length === 0) {
+    if (!this.appActive || Boolean(this.historySyncInProgress) || records.length === 0) {
       return;
     }
 
@@ -341,3 +348,22 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
 
 const getErrorMessage = (caught: unknown) =>
   caught instanceof Error ? caught.message : "Tindakan BLE DialySip gagal.";
+
+const toFallbackStatus = (snapshot: DailySipSnapshot): SyncedDeviceStatus => ({
+  deviceId: snapshot.device.deviceId,
+  name: snapshot.device.name,
+  firmwareVersion: snapshot.device.firmwareVersion,
+  connection: "connected",
+  batteryPercent: snapshot.device.batteryPercent,
+  lastRecordId: snapshot.device.lastRecordId,
+  currentWeightG: snapshot.device.currentWeightG,
+  stableForSeconds: snapshot.device.stableForSeconds,
+  calibrationActive: snapshot.device.calibrationActive,
+  calibrationStep: snapshot.device.calibrationStep,
+  calibrated: snapshot.device.calibrated,
+  rtcOk: snapshot.device.rtcOk,
+  storageOk: snapshot.device.storageOk,
+  sdOk: snapshot.device.sdOk,
+  sensorOk: snapshot.device.sensorOk,
+  lastSyncId: snapshot.device.lastRecordId
+});

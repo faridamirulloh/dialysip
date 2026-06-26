@@ -738,6 +738,11 @@ export const styles = StyleSheet.create({
   segmentButtonTextActive: {
     color: palette.accent,
   },
+  historyToolbar: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 12,
+  },
   periodSelector: {
     flexDirection: "row",
     alignItems: "center",

@@ -42,6 +42,7 @@ export default function App() {
     clearBleLog,
     isBusy,
     error,
+    refreshSnapshot,
     connectDevice,
     syncNow,
     startCalibration,
@@ -282,6 +283,8 @@ export default function App() {
                 <HistoryScreen
                   snapshot={snapshot}
                   copy={copy}
+                  onRefresh={refreshSnapshot}
+                  onSync={syncNow}
                   onDeleteDate={deleteHistoryForDate}
                   onDeleteAllHistory={deleteAllHistory}
                 />
