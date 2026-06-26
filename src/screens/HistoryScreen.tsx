@@ -32,11 +32,17 @@ export function HistoryScreen({ snapshot, copy, onDeleteDate, onDeleteAllHistory
   const [selectedBarIndex, setSelectedBarIndex] = useState<number | null>(null);
   const [pendingDelete, setPendingDelete] = useState<"date" | "all" | null>(null);
   const [deleteDateText, setDeleteDateText] = useState(formatDateKey(new Date()));
+  const [currentTime, setCurrentTime] = useState(() => new Date());
   const language = snapshot.settings.language;
 
   useEffect(() => {
     setPeriodIndex(0);
   }, [range]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const periods = snapshot.history[range];
   const selectedIndex = Math.min(periodIndex, periods.length - 1);
@@ -44,7 +50,13 @@ export function HistoryScreen({ snapshot, copy, onDeleteDate, onDeleteAllHistory
   const chartTotals = period.chartTotalsMl.length ? period.chartTotalsMl : [0];
   const chartLimit = range === "monthly" ? Math.max(...chartTotals, 1) : snapshot.settings.dailyLimitMl;
   const maxTotal = Math.max(...chartTotals, chartLimit, 1);
-  const chartLabels = getHistoryChartLabels(range, chartTotals.length, language);
+  const chartLabels = getHistoryChartLabels(
+    range,
+    chartTotals.length,
+    language,
+    range === "daily" && period.id === formatDateKey(currentTime),
+    currentTime,
+  );
   const volumeTicks = [maxTotal, Math.round(maxTotal / 2), 0];
   const periodTypeLabel = range === "daily" ? copy.date : range === "weekly" ? copy.week : copy.month;
 

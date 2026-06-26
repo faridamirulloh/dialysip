@@ -110,6 +110,9 @@ static constexpr uint8_t CALIBRATION_BUTTON_CLICKS = 5;
 static constexpr uint8_t RESET_DAILY_BUTTON_CLICKS = 7;
 static constexpr uint16_t CALIBRATION_KNOWN_WEIGHT_G = 250;
 static constexpr uint16_t CALIBRATION_SETTLE_DELAY_MS = 3000;
+static constexpr uint32_t APP_HEARTBEAT_INTERVAL_MS = 10000;
+static constexpr uint8_t APP_HEARTBEAT_MISSED_LIMIT = 3;
+static constexpr uint32_t APP_HEARTBEAT_TIMEOUT_MS = APP_HEARTBEAT_INTERVAL_MS * APP_HEARTBEAT_MISSED_LIMIT;
 
 // BLE UUIDs are custom v1 UUIDs. Keep them stable for the Android app.
 static constexpr char BLE_SERVICE_UUID[] = "3f4f1000-9d9a-4a5f-8f13-102a2d4d1000";

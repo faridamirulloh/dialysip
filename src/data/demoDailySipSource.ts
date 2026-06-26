@@ -1,6 +1,7 @@
 import { createDemoSnapshot } from "./demoData";
 import type {
   BleActivity,
+  BleLogEntry,
   DailySipDataSource,
   DailySipSettings,
   DailySipSnapshot,
@@ -100,6 +101,12 @@ export class DemoDailySipSource implements DailySipDataSource {
   subscribeToBleActivity(_onActivity: (activity: BleActivity) => void) {
     return () => undefined;
   }
+
+  subscribeToBleLog(_onEntry: (entry: BleLogEntry) => void) {
+    return () => undefined;
+  }
+
+  setAppActive(_isActive: boolean) {}
 
   async autoConnectActiveDevice() {
     return null;

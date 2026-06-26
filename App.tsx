@@ -38,6 +38,8 @@ export default function App() {
   const {
     snapshot,
     bleActivity,
+    bleLog,
+    clearBleLog,
     isBusy,
     error,
     connectDevice,
@@ -246,7 +248,14 @@ export default function App() {
               ]}
             >
               {screen === "pair" && (
-                <PairScreen snapshot={snapshot} copy={copy} onConnect={connectDevice} onSync={syncNow} />
+                <PairScreen
+                  snapshot={snapshot}
+                  bleLog={bleLog}
+                  copy={copy}
+                  onConnect={connectDevice}
+                  onSync={syncNow}
+                  onClearLog={clearBleLog}
+                />
               )}
               {screen === "calibration" && (
                 <CalibrationScreen

@@ -1,7 +1,7 @@
 import { Platform } from "react-native";
 import type { BleManager, Device, Subscription } from "react-native-ble-plx";
 import type { BleConnectionSnapshot, BleSyncResult, PendingDeviceSettings, SyncedDeviceRecord } from "../data/syncTypes";
-import type { BleActivity } from "../data/types";
+import type { BleActivity, BleLogEntry } from "../data/types";
 import { decodeJsonBase64, encodeJsonBase64 } from "./base64";
 import { requestBlePermissions } from "./blePermissions";
 import {
@@ -23,6 +23,10 @@ const ANDROID_MTU = 512;
 const LOG_SUBSCRIPTION_SETTLE_MS = 250;
 const LEGACY_LOG_NOTIFICATION_IDLE_MS = 600;
 const LOG_NOTIFICATION_IDLE_MS = 10000;
+const STATUS_READ_ATTEMPTS = 3;
+const STATUS_READ_RETRY_MS = 250;
+const BLE_LOG_PAYLOAD_MAX_LENGTH = 480;
+const APP_HEARTBEAT_INTERVAL_MS = 10000;
 
 export class DailySipBleClient {
   private manager?: BleManager;
@@ -30,6 +34,11 @@ export class DailySipBleClient {
   private disconnectSubscription?: Subscription;
   private disconnectListener?: (error: unknown) => void;
   private activityListener?: (activity: BleActivity) => void;
+  private logListener?: (entry: BleLogEntry) => void;
+  private logSequence = 0;
+  private collectingHistoryNotifications = false;
+  private appActive = false;
+  private heartbeatTimer?: ReturnType<typeof setInterval>;
 
   setDisconnectListener(listener: (error: unknown) => void) {
     this.disconnectListener = listener;
@@ -39,18 +48,33 @@ export class DailySipBleClient {
     this.activityListener = listener;
   }
 
+  setLogListener(listener: (entry: BleLogEntry) => void) {
+    this.logListener = listener;
+  }
+
+  setAppActive(isActive: boolean) {
+    this.appActive = isActive;
+    if (isActive) {
+      this.startHeartbeat();
+      return;
+    }
+
+    this.stopHeartbeat();
+  }
+
   async connectToBottle(expectedDeviceId?: string): Promise<BleConnectionSnapshot> {
     const existingStatus = await this.readConnectedStatus(expectedDeviceId);
     if (existingStatus) {
       await this.watchDeviceDisconnect();
       await this.writeTimeSync();
+      this.startHeartbeat();
       return { status: existingStatus };
     }
 
-    const device = await this.findBottle();
-    this.connectedDevice = (await device.isConnected())
-      ? device
-      : await device.connect({ timeout: CONNECT_TIMEOUT_MS });
+    const bottle = await this.findBottle();
+    this.connectedDevice = bottle.isConnected
+      ? bottle.device
+      : await bottle.device.connect({ timeout: CONNECT_TIMEOUT_MS });
     await this.requestLargeMtu();
     this.connectedDevice = await this.connectedDevice.discoverAllServicesAndCharacteristics();
     await this.watchDeviceDisconnect();
@@ -62,11 +86,16 @@ export class DailySipBleClient {
     }
 
     await this.writeTimeSync();
+    this.startHeartbeat();
 
     return { status };
   }
 
-  async sync(afterRecordId: string, settings: PendingDeviceSettings): Promise<BleSyncResult> {
+  async sync(
+    afterRecordId: string,
+    settings: PendingDeviceSettings,
+    historyMode: "full" | "after_last_sync"
+  ): Promise<BleSyncResult> {
     const device = await this.ensureConnected();
     await device.discoverAllServicesAndCharacteristics();
     await this.writeSettings(settings);
@@ -76,7 +105,10 @@ export class DailySipBleClient {
 
     try {
       await wait(LOG_SUBSCRIPTION_SETTLE_MS);
-      await this.writeCommand("request_sync", { after_record_id: afterRecordId });
+      await this.writeCommand("request_sync", {
+        after_record_id: afterRecordId,
+        history_mode: historyMode
+      });
       logCollector.startIdleTimer();
       logPayload = await logCollector.result;
     } catch (caught) {
@@ -132,9 +164,13 @@ export class DailySipBleClient {
         }
 
         try {
-          this.emitActivity("receive");
           const records: DailySipBleLogRecordPayload[] = [];
-          appendLogNotificationPayload(decodeJsonBase64<unknown>(characteristic.value), records);
+          const payload = decodeJsonBase64<unknown>(characteristic.value);
+          if (!this.collectingHistoryNotifications) {
+            this.emitActivity("receive");
+            this.emitLog("receive", dailySipBleContract.characteristics.logStream, payload);
+          }
+          appendLogNotificationPayload(payload, records);
           const syncedRecords = toSyncedDeviceRecords({ records });
           if (syncedRecords.length > 0) {
             onRecords(syncedRecords);
@@ -151,6 +187,7 @@ export class DailySipBleClient {
   }
 
   async disconnect() {
+    this.stopHeartbeat();
     if (!this.connectedDevice) {
       return;
     }
@@ -164,7 +201,7 @@ export class DailySipBleClient {
     }
   }
 
-  private async findBottle(): Promise<Device> {
+  private async findBottle(): Promise<FoundBottle> {
     const manager = await this.getManager();
     const permissionResult = await requestBlePermissions();
 
@@ -174,10 +211,10 @@ export class DailySipBleClient {
 
     const connectedBottle = await this.findConnectedBottle(manager);
     if (connectedBottle) {
-      return connectedBottle;
+      return { device: connectedBottle, isConnected: true };
     }
 
-    return new Promise<Device>((resolve, reject) => {
+    return new Promise<FoundBottle>((resolve, reject) => {
       let settled = false;
       const finish = (callback: () => void) => {
         if (settled) {
@@ -193,7 +230,7 @@ export class DailySipBleClient {
         finish(() => reject(new Error("DialySip bottle was not found during the BLE scan window.")));
       }, SCAN_TIMEOUT_MS);
 
-      manager.startDeviceScan([dailySipBleContract.serviceUuid], { allowDuplicates: false }, (error, scannedDevice) => {
+      manager.startDeviceScan(null, { allowDuplicates: false }, (error, scannedDevice) => {
         if (error) {
           finish(() => reject(error));
           return;
@@ -203,7 +240,7 @@ export class DailySipBleClient {
           return;
         }
 
-        finish(() => resolve(scannedDevice));
+        finish(() => resolve({ device: scannedDevice, isConnected: false }));
       });
     });
   }
@@ -274,6 +311,7 @@ export class DailySipBleClient {
       this.connectedDevice = undefined;
       this.disconnectSubscription?.remove();
       this.disconnectSubscription = undefined;
+      this.stopHeartbeat();
       this.disconnectListener?.(error);
     });
   }
@@ -291,8 +329,11 @@ export class DailySipBleClient {
     let idleTimeoutId: ReturnType<typeof setTimeout> | undefined;
     let resetIdleTimer: (() => void) | undefined;
 
+    this.collectingHistoryNotifications = true;
+
     const cleanup = () => {
       subscription?.remove();
+      this.collectingHistoryNotifications = false;
 
       if (idleTimeoutId) {
         clearTimeout(idleTimeoutId);
@@ -355,8 +396,9 @@ export class DailySipBleClient {
           }
 
           try {
-            this.emitActivity("receive");
             const payload = decodeJsonBase64<unknown>(characteristic.value);
+            this.emitActivity("receive");
+            this.emitLog("receive", dailySipBleContract.characteristics.logStream, payload);
             const syncControl = getLogSyncControl(payload);
 
             if (syncControl.error) {
@@ -408,10 +450,28 @@ export class DailySipBleClient {
   }
 
   private async readStatus() {
-    const payload = await this.readJsonCharacteristic<DailySipBleStatusPayload>(
-      dailySipBleContract.characteristics.status
-    );
-    return toSyncedDeviceStatus(payload, this.connectedDevice?.name ?? dailySipBleContract.advertisedName);
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= STATUS_READ_ATTEMPTS; attempt += 1) {
+      try {
+        const payload = await this.readJsonCharacteristic<DailySipBleStatusPayload>(
+          dailySipBleContract.characteristics.status
+        );
+        return toSyncedDeviceStatus(payload, this.connectedDevice?.name ?? dailySipBleContract.advertisedName);
+      } catch (caught) {
+        lastError = caught;
+        if (attempt === STATUS_READ_ATTEMPTS) {
+          throw caught;
+        }
+
+        await wait(STATUS_READ_RETRY_MS);
+        if (this.connectedDevice) {
+          this.connectedDevice = await this.connectedDevice.discoverAllServicesAndCharacteristics();
+        }
+      }
+    }
+
+    throw lastError;
   }
 
   private async writeSettings(settings: PendingDeviceSettings) {
@@ -441,6 +501,39 @@ export class DailySipBleClient {
     });
   }
 
+  private startHeartbeat() {
+    if (!this.appActive || !this.connectedDevice || this.heartbeatTimer) {
+      return;
+    }
+
+    void this.sendHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      void this.sendHeartbeat();
+    }, APP_HEARTBEAT_INTERVAL_MS);
+  }
+
+  private stopHeartbeat() {
+    if (!this.heartbeatTimer) {
+      return;
+    }
+
+    clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = undefined;
+  }
+
+  private async sendHeartbeat() {
+    if (!this.appActive || !this.connectedDevice) {
+      this.stopHeartbeat();
+      return;
+    }
+
+    try {
+      await this.writeCommand("heartbeat", {});
+    } catch {
+      this.stopHeartbeat();
+    }
+  }
+
   private async readJsonCharacteristic<T>(characteristicUuid: string): Promise<T> {
     const device = await this.ensureDeviceHandle();
     const characteristic = await device.readCharacteristicForService(
@@ -452,8 +545,10 @@ export class DailySipBleClient {
       throw new Error(`DialySip characteristic ${characteristicUuid} returned no value.`);
     }
 
+    const payload = decodeJsonBase64<T>(characteristic.value);
     this.emitActivity("receive");
-    return decodeJsonBase64<T>(characteristic.value);
+    this.emitLog("receive", characteristicUuid, payload);
+    return payload;
   }
 
   private async writeJsonCharacteristic(characteristicUuid: string, payload: unknown) {
@@ -464,10 +559,22 @@ export class DailySipBleClient {
       encodeJsonBase64(payload)
     );
     this.emitActivity("send");
+    this.emitLog("send", characteristicUuid, payload);
   }
 
   private emitActivity(activity: BleActivity) {
     this.activityListener?.(activity);
+  }
+
+  private emitLog(direction: BleActivity, characteristicUuid: string, payload: unknown) {
+    this.logSequence += 1;
+    this.logListener?.({
+      id: this.logSequence,
+      direction,
+      characteristic: getCharacteristicName(characteristicUuid),
+      payload: summarizeBlePayload(payload),
+      timestamp: Date.now()
+    });
   }
 
   private async ensureDeviceHandle(): Promise<Device> {
@@ -503,6 +610,41 @@ export class DailySipBleClient {
     }
   }
 }
+
+interface FoundBottle {
+  device: Device;
+  isConnected: boolean;
+}
+
+const characteristicNames: Record<string, string> = {
+  [dailySipBleContract.characteristics.status]: "status",
+  [dailySipBleContract.characteristics.settings]: "settings",
+  [dailySipBleContract.characteristics.timeSync]: "time",
+  [dailySipBleContract.characteristics.command]: "command",
+  [dailySipBleContract.characteristics.logStream]: "history",
+  [dailySipBleContract.characteristics.ack]: "ack"
+};
+
+const getCharacteristicName = (characteristicUuid: string) =>
+  characteristicNames[characteristicUuid] ?? "unknown";
+
+const summarizeBlePayload = (payload: unknown) => {
+  let value: string;
+
+  if (typeof payload === "string") {
+    value = payload;
+  } else {
+    try {
+      value = JSON.stringify(payload);
+    } catch {
+      value = "[unserializable payload]";
+    }
+  }
+
+  return value.length > BLE_LOG_PAYLOAD_MAX_LENGTH
+    ? `${value.slice(0, BLE_LOG_PAYLOAD_MAX_LENGTH - 3)}...`
+    : value;
+};
 
 const isDailySipDevice = (device: Device) => {
   const advertisedName = device.name ?? device.localName ?? "";

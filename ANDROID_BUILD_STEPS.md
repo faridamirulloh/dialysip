@@ -62,33 +62,57 @@ Expected output:
 C:\LocalDocuments\Projects\Ari\daily-sip\android\app\build\outputs\apk\release\app-release.apk
 ```
 
+## Automated Windows Release Build
+
+Use the included script to run the Windows workaround end to end. From the project root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build-android-release.ps1
+```
+
+The script creates a fresh short path under `C:\tmp`, copies the project, removes temporary native caches, relinks locked dependencies offline, and runs `assembleRelease`. If it encounters the known `ExpoModulesPackage` autolinking failure, it adds the shim only in the temporary copy and retries. On success, it overwrites:
+
+```text
+C:\LocalDocuments\Projects\Ari\daily-sip\app-release.apk
+```
+
+The temporary workspace is retained under `C:\tmp\ds...` for build logs and troubleshooting. The project source is not modified.
+
 ## Windows Release Workaround
 
-On this machine, the direct release build hit Windows native build path issues. The successful workaround was to build from a short temporary path.
+On this machine, the direct release build can hit Windows native build path issues. Build from a fresh, short temporary path instead. This is the recommended release workflow.
 
-Create a temp copy:
+Create a fresh temporary copy. The `ds` directory name stays short for native toolchain path limits; Robocopy exit codes below `8` are successful:
 
 ```powershell
-New-Item -ItemType Directory -Path C:\tmp\daily-sip-release-build
-robocopy C:\LocalDocuments\Projects\Ari\daily-sip C:\tmp\daily-sip-release-build /E /XD .git .expo android\build android\app\build android\.gradle android\.kotlin /XF .metro-stderr.log .metro-stdout.log
+$source = 'C:\LocalDocuments\Projects\Ari\daily-sip'
+$root = (Resolve-Path -LiteralPath 'C:\tmp').Path
+$buildDir = Join-Path $root ('ds' + (Get-Date -Format 'HHmmss'))
+New-Item -ItemType Directory -Path $buildDir | Out-Null
+
+robocopy $source $buildDir /E /XD .git .expo android\build android\app\build android\.gradle android\.kotlin /XF .metro-stderr.log .metro-stdout.log
+if ($LASTEXITCODE -ge 8) { throw "Robocopy failed with exit code $LASTEXITCODE" }
 ```
 
-Remove copied native build caches from the temp copy:
+Remove copied native build caches and recreate pnpm links in the temp copy:
 
 ```powershell
-Remove-Item -LiteralPath C:\tmp\daily-sip-release-build\android\build -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath C:\tmp\daily-sip-release-build\android\.gradle -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath C:\tmp\daily-sip-release-build\android\.kotlin -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath C:\tmp\daily-sip-release-build\android\app\build -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath C:\tmp\daily-sip-release-build\android\app\.cxx -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath C:\tmp\daily-sip-release-build\node_modules\.pnpm\expo-modules-core@2.5.0\node_modules\expo-modules-core\android\.cxx -Recurse -Force -ErrorAction SilentlyContinue
-```
+Remove-Item -LiteralPath "$buildDir\android\build" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath "$buildDir\android\.gradle" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath "$buildDir\android\.kotlin" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath "$buildDir\android\app\build" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath "$buildDir\android\app\.cxx" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath "$buildDir\node_modules\.pnpm\expo-modules-core@2.5.0\node_modules\expo-modules-core\android\.cxx" -Recurse -Force -ErrorAction SilentlyContinue
 
-Recreate pnpm links in the temp copy:
-
-```powershell
-cd C:\tmp\daily-sip-release-build
+Set-Location $buildDir
 corepack pnpm install --offline --frozen-lockfile --force
+```
+
+Build from the temp copy:
+
+```powershell
+Set-Location "$buildDir\android"
+.\gradlew.bat assembleRelease --console=plain
 ```
 
 If release build fails with:
@@ -101,7 +125,7 @@ import expo.core.ExpoModulesPackage;
 add this temp-only shim at:
 
 ```text
-C:\tmp\daily-sip-release-build\android\app\src\main\java\expo\core\ExpoModulesPackage.java
+$buildDir\android\app\src\main\java\expo\core\ExpoModulesPackage.java
 ```
 
 ```java
@@ -129,17 +153,23 @@ public class ExpoModulesPackage implements ReactPackage {
 }
 ```
 
-Build from the temp copy:
+Create its parent directory before adding the shim:
 
 ```powershell
-cd C:\tmp\daily-sip-release-build\android
+New-Item -ItemType Directory -Path "$buildDir\android\app\src\main\java\expo\core" -Force | Out-Null
+```
+
+Then rerun the same release command:
+
+```powershell
+Set-Location "$buildDir\android"
 .\gradlew.bat assembleRelease --console=plain
 ```
 
 Copy the release APK back to the project:
 
 ```powershell
-Copy-Item -LiteralPath C:\tmp\daily-sip-release-build\android\app\build\outputs\apk\release\app-release.apk -Destination C:\LocalDocuments\Projects\Ari\daily-sip\app-release.apk -Force
+Copy-Item -LiteralPath "$buildDir\android\app\build\outputs\apk\release\app-release.apk" -Destination C:\LocalDocuments\Projects\Ari\daily-sip\app-release.apk -Force
 ```
 
 Final copied output:

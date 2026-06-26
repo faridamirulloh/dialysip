@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState } from "react-native";
 import { createDailySipDataSource } from "./createDailySipDataSource";
-import type { BleActivity, DailySipSettings, DailySipSnapshot, ManualIntakeInput } from "./types";
+import type { BleActivity, BleLogEntry, DailySipSettings, DailySipSnapshot, ManualIntakeInput } from "./types";
 
 const BLE_ACTIVITY_VISIBLE_MS = 2000;
+const MAX_BLE_LOG_ENTRIES = 100;
 
 export const useDailySipData = () => {
   const sourceRef = useRef(createDailySipDataSource());
@@ -10,6 +12,8 @@ export const useDailySipData = () => {
   const bleActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [snapshot, setSnapshot] = useState<DailySipSnapshot | null>(null);
   const [bleActivity, setBleActivity] = useState<BleActivity | null>(null);
+  const [bleLog, setBleLog] = useState<BleLogEntry[]>([]);
+  const [isAppActive, setIsAppActive] = useState(AppState.currentState === "active");
   const [isBusy, setIsBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const autoConnectMode = snapshot?.mode;
@@ -66,6 +70,34 @@ export const useDailySipData = () => {
   }, []);
 
   useEffect(() => {
+    return sourceRef.current.subscribeToBleLog((entry) => {
+      setBleLog((current) => [...current, entry].slice(-MAX_BLE_LOG_ENTRIES));
+    });
+  }, []);
+
+  useEffect(() => {
+    sourceRef.current.setAppActive(AppState.currentState === "active");
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        setIsAppActive(true);
+        sourceRef.current.setAppActive(true);
+      } else if (nextState === "background") {
+        setIsAppActive(false);
+        sourceRef.current.setAppActive(false);
+      }
+    });
+
+    return () => {
+      sourceRef.current.setAppActive(false);
+      subscription.remove();
+    };
+  }, []);
+
+  const clearBleLog = useCallback(() => {
+    setBleLog([]);
+  }, []);
+
+  useEffect(() => {
     const unsubscribe = sourceRef.current.subscribeToBleActivity((activity) => {
       if (bleActivityTimeoutRef.current) {
         clearTimeout(bleActivityTimeoutRef.current);
@@ -87,7 +119,7 @@ export const useDailySipData = () => {
   }, []);
 
   useEffect(() => {
-    if (!autoConnectMode || !hasRegisteredDevice) {
+    if (!isAppActive || !autoConnectMode || !hasRegisteredDevice) {
       return undefined;
     }
 
@@ -97,11 +129,13 @@ export const useDailySipData = () => {
     }, 10000);
 
     return () => clearInterval(timer);
-  }, [autoConnectActiveDevice, autoConnectMode, hasRegisteredDevice]);
+  }, [autoConnectActiveDevice, autoConnectMode, hasRegisteredDevice, isAppActive]);
 
   return {
     snapshot,
     bleActivity,
+    bleLog,
+    clearBleLog,
     isBusy,
     error,
     connectDevice: () => run(() => sourceRef.current.connectDevice()),

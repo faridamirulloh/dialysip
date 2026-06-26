@@ -40,15 +40,8 @@ const char *calibrationStepName() {
 }
 
 String buildStatusJson() {
-  String warning = "normal";
-  if (todayTotalMl >= dailyLimitMl) {
-    warning = "over_limit";
-  } else if (todayTotalMl >= ((uint32_t)dailyLimitMl * warningPercent / 100UL)) {
-    warning = "near_limit";
-  }
-
   String json;
-  json.reserve(520);
+  json.reserve(400);
   json += "{\"protocol_version\":";
   json += BLE_PROTOCOL_VERSION;
   json += ",\"device_id\":\"";
@@ -65,49 +58,25 @@ String buildStatusJson() {
   }
   json += ",\"stable_for_ms\":";
   json += hasCurrentWeight ? (millis() - scaleStableSinceMs) : 0;
-  json += ",\"scale_stable\":";
-  json += scaleStable ? "true" : "false";
   json += ",\"calibration_active\":";
   json += calibrationMode ? "true" : "false";
   json += ",\"calibration_step\":\"";
   json += calibrationStepName();
   json += "\"";
-  json += ",\"today_total_ml\":";
-  json += todayTotalMl;
-  json += ",\"daily_limit_ml\":";
-  json += dailyLimitMl;
   json += ",\"last_record_id\":\"";
   json += jsonEscape(lastRecordId);
   json += "\",\"last_sync_id\":\"";
   json += jsonEscape(lastSyncId);
-  json += "\",\"last_acked_record_id\":\"";
-  json += jsonEscape(lastSyncId);
   json += "\"";
-  json += ",\"last_event_type\":\"";
-  json += lastEventType;
-  json += "\",\"last_event_amount_ml\":";
-  json += lastEventAmountMl;
-  json += ",\"timezone_offset_minutes\":";
-  json += timezoneOffsetMinutes;
-  json += ",\"battery_mv\":";
-  json += readBatteryMv();
   json += ",\"rtc_ok\":";
   json += rtcOk ? "true" : "false";
   json += ",\"storage_ok\":";
   json += storageOk ? "true" : "false";
-  json += ",\"sd_ok\":";
-  json += storageOk ? "true" : "false";
-  json += ",\"bmi160_ok\":";
-  json += bmiOk ? "true" : "false";
-  json += ",\"hx711_ok\":";
-  json += hx711Ok ? "true" : "false";
   json += ",\"sensor_ok\":";
   json += (bmiOk && hx711Ok) ? "true" : "false";
   json += ",\"calibrated\":";
   json += (abs(calibrationFactor - DEFAULT_CALIBRATION_FACTOR) > 0.01f) ? "true" : "false";
-  json += ",\"warning\":\"";
-  json += warning;
-  json += "\"}";
+  json += "}";
   return json;
 }
 
@@ -209,7 +178,24 @@ void exitBleSyncMode() {
   updateStatusCharacteristic(true);
 }
 
-void handleLegacyCommand(const String &command) {
+void serviceAppHeartbeatTimeout() {
+  if (!bleConnected || lastAppBleActivityMs == 0 ||
+      (uint32_t)(millis() - lastAppBleActivityMs) < APP_HEARTBEAT_TIMEOUT_MS) {
+    return;
+  }
+
+  bleConnected = false;
+  lastAppBleActivityMs = 0;
+
+  if (bleSyncMode) {
+    exitBleSyncMode();
+  } else {
+    showMainDisplay();
+    refreshBleStatusIndicator();
+  }
+}
+
+bool handleLegacyCommand(const String &command) {
   if (command == "tare") {
     tareScale();
   } else if (command.startsWith("calibrate:")) {
@@ -229,16 +215,20 @@ void handleLegacyCommand(const String &command) {
   } else {
     noteEvent("device_error", 0);
   }
+
+  return true;
 }
 
-void handleJsonCommand(const String &payload) {
+bool handleJsonCommand(const String &payload) {
   String command;
   if (!readJsonString(payload, "command", command)) {
     noteEvent("device_error", 0);
-    return;
+    return true;
   }
 
-  if (command == "tare") {
+  if (command == "heartbeat") {
+    return false;
+  } else if (command == "tare") {
     tareScale();
   } else if (command == "finish_calibration") {
     uint32_t knownMl = 0;
@@ -252,8 +242,15 @@ void handleJsonCommand(const String &payload) {
       exitCalibrationMode();
     }
   } else if (command == "request_sync") {
+    String historyMode = "after_last_sync";
+    (void)readJsonString(payload, "history_mode", historyMode);
+
     String afterId = lastSyncId;
-    (void)readJsonRecordId(payload, "after_record_id", afterId);
+    if (historyMode == "full") {
+      afterId = "";
+    } else {
+      (void)readJsonRecordId(payload, "after_record_id", afterId);
+    }
     streamLogsAfter(afterId);
   } else if (command == "status") {
     updateStatusCharacteristic(true);
@@ -267,15 +264,20 @@ void handleJsonCommand(const String &payload) {
   } else {
     noteEvent("device_error", 0);
   }
+
+  return true;
 }
 
 void handleCommand(const String &command) {
+  bool shouldNotifyStatus = false;
   if (isJsonPayload(command)) {
-    handleJsonCommand(command);
+    shouldNotifyStatus = handleJsonCommand(command);
   } else {
-    handleLegacyCommand(command);
+    shouldNotifyStatus = handleLegacyCommand(command);
   }
-  updateStatusCharacteristic(true);
+  if (shouldNotifyStatus) {
+    updateStatusCharacteristic(true);
+  }
 }
 
 void handleTimeSync(const String &payload) {

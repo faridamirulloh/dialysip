@@ -14,6 +14,7 @@ void noteCurrentWeight(float nextWeightG) {
   if (!hasCurrentWeight || abs(nextWeightG - currentWeightG) > STABLE_VARIATION_G) {
     scaleStableSinceMs = now;
     scaleStable = false;
+    stableWeightFinalized = false;
   } else {
     scaleStable = (now - scaleStableSinceMs) >= LIVE_WEIGHT_STABLE_MS;
   }
@@ -74,7 +75,7 @@ bool updateImuDebugFromAccel() {
 }
 
 void updateMainDisplayLive() {
-  if (!mainDisplayVisible || calibrationMode || intakeViewPosition != 0) {
+  if ((!mainDisplayVisible && !bleSyncMode) || calibrationMode || intakeViewPosition != 0) {
     return;
   }
   if (buttonInteractionActive()) {
@@ -122,6 +123,7 @@ void updateMainDisplayLive() {
       showMainDisplay();
     } else {
       disarmSleepAfterStableRead();
+      stableWeightFinalized = false;
       showBottleRemovedDisplay();
     }
     return;
@@ -132,12 +134,17 @@ void updateMainDisplayLive() {
   }
 
   if (scaleStable && !imuMotionActive) {
-    armSleepAfterStableRead();
+    if (!stableWeightFinalized || (!bleConnected && !bleSyncMode)) {
+      armSleepAfterStableRead();
+    } else {
+      disarmSleepAfterStableRead();
+    }
   } else {
+    stableWeightFinalized = false;
     disarmSleepAfterStableRead();
   }
 
-  if (changed) {
+  if (changed && mainDisplayVisible) {
     showMainDisplay();
   }
 }
@@ -260,6 +267,7 @@ void calibrateScale(uint16_t knownMl) {
 void processWeightWake(const String &reason) {
   resetDailyTotalIfNeeded();
   disarmSleepAfterStableRead();
+  stableWeightFinalized = false;
   sensorStartupIndicatorActive = false;
 
   if (!hx711Ok) {
@@ -350,6 +358,7 @@ void waitForConfirmationCountdown() {
     delay(50);
   }
   confirmationDisplayShownMs = 0;
+  showMainDisplay();
 }
 
 bool finalizeStableWeightBeforeSleep() {

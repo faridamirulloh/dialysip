@@ -61,6 +61,7 @@ export type DailySipBleCommand =
   | "start_calibration"
   | "finish_calibration"
   | "request_sync"
+  | "heartbeat"
   | "clear_error"
   | "factory_reset";
 

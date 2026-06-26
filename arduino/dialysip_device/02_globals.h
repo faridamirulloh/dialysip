@@ -27,6 +27,7 @@ float currentWeightG = 0.0f;
 bool hasLastStableWeight = false;
 bool hasCurrentWeight = false;
 bool scaleStable = false;
+bool stableWeightFinalized = false;
 bool weightUnstableActive = false;
 bool imuMotionActive = false;
 bool sensorStartupIndicatorActive = false;
@@ -72,6 +73,7 @@ uint16_t historyRetentionDays = DEFAULT_HISTORY_RETENTION_DAYS;
 int16_t timezoneOffsetMinutes = DEFAULT_TIMEZONE_OFFSET_MINUTES;
 
 uint32_t lastStatusNotifyMs = 0;
+uint32_t lastAppBleActivityMs = 0;
 uint32_t scaleStableSinceMs = 0;
 uint32_t lastMainDisplayLiveUpdateMs = 0;
 uint32_t lastCountdownBarUpdateMs = 0;

@@ -3,6 +3,7 @@ import { isRegisteredDeviceId, SqliteDailySipStore } from "./sqliteDailySipStore
 import type { SyncedDeviceRecord } from "./syncTypes";
 import type {
   BleActivity,
+  BleLogEntry,
   DailySipDataSource,
   DailySipSettings,
   DailySipSnapshot,
@@ -14,9 +15,12 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
   private readonly ble = new DailySipBleClient();
   private liveSnapshotListener?: (snapshot: DailySipSnapshot) => void;
   private bleActivityListener?: (activity: BleActivity) => void;
+  private bleLogListener?: (entry: BleLogEntry) => void;
   private liveSyncUnsubscribe?: () => void;
   private liveSyncStarting?: Promise<void>;
   private historySyncInProgress = false;
+  private lastAutoConnectError?: string;
+  private appActive = false;
 
   constructor() {
     this.ble.setDisconnectListener(() => {
@@ -24,6 +28,9 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
     });
     this.ble.setActivityListener((activity) => {
       this.bleActivityListener?.(activity);
+    });
+    this.ble.setLogListener((entry) => {
+      this.bleLogListener?.(entry);
     });
   }
 
@@ -49,6 +56,23 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
     };
   }
 
+  subscribeToBleLog(onEntry: (entry: BleLogEntry) => void) {
+    this.bleLogListener = onEntry;
+    return () => {
+      if (this.bleLogListener === onEntry) {
+        this.bleLogListener = undefined;
+      }
+    };
+  }
+
+  setAppActive(isActive: boolean) {
+    this.appActive = isActive;
+    this.ble.setAppActive(isActive);
+    if (!isActive) {
+      this.clearLiveSyncMonitor();
+    }
+  }
+
   async autoConnectActiveDevice(): Promise<DailySipSnapshot | null> {
     const snapshot = await this.store.loadSnapshot();
     if (!isRegisteredDeviceId(snapshot.device.deviceId)) {
@@ -63,9 +87,18 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
       this.publishSnapshot(connectedSnapshot);
       const syncedSnapshot = await this.syncConnectedDevice();
       void this.ensureLiveSyncMonitor();
+      this.lastAutoConnectError = undefined;
       return syncedSnapshot ?? connectedSnapshot;
-    } catch {
-      return null;
+    } catch (caught) {
+      const message = getErrorMessage(caught);
+      if (this.lastAutoConnectError === message) {
+        return null;
+      }
+
+      this.lastAutoConnectError = message;
+      const failedSnapshot = await this.store.recordBleError(message);
+      this.publishSnapshot(failedSnapshot);
+      return failedSnapshot;
     }
   }
 
@@ -199,22 +232,26 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
       throw new Error("DialySip history sync is already in progress.");
     }
 
-    const afterRecordId =
-      snapshot.settings.historySyncMode === "full" ? "" : snapshot.device.lastRecordId;
+    const historyMode = snapshot.settings.historySyncMode;
+    const afterRecordId = historyMode === "full" ? "" : snapshot.device.lastRecordId;
 
     this.historySyncInProgress = true;
     try {
-      return await this.ble.sync(afterRecordId, {
-        ...snapshot.settings,
-        overLimitThresholdPercent: 100
-      });
+      return await this.ble.sync(
+        afterRecordId,
+        {
+          ...snapshot.settings,
+          overLimitThresholdPercent: 100
+        },
+        historyMode
+      );
     } finally {
       this.historySyncInProgress = false;
     }
   }
 
   private async ensureLiveSyncMonitor() {
-    if (this.liveSyncUnsubscribe || this.liveSyncStarting) {
+    if (!this.appActive || this.liveSyncUnsubscribe || this.liveSyncStarting) {
       return this.liveSyncStarting;
     }
 
@@ -227,6 +264,10 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
       }
     )
       .then((subscription) => {
+        if (!this.appActive) {
+          subscription.remove();
+          return;
+        }
         this.liveSyncUnsubscribe = () => subscription.remove();
       })
       .catch(() => {
@@ -240,7 +281,7 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
   }
 
   private async applyLiveRecords(records: SyncedDeviceRecord[]) {
-    if (this.historySyncInProgress || records.length === 0) {
+    if (!this.appActive || this.historySyncInProgress || records.length === 0) {
       return;
     }
 

@@ -3,11 +3,13 @@
 class ServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer *server) override {
     bleConnected = true;
+    lastAppBleActivityMs = millis();
     updateStatusCharacteristic(true);
   }
 
   void onDisconnect(BLEServer *server) override {
     bleConnected = false;
+    lastAppBleActivityMs = 0;
     server->getAdvertising()->start();
   }
 };
@@ -32,6 +34,7 @@ class TimeCallbacks : public BLECharacteristicCallbacks {
 
 class StatusCallbacks : public BLECharacteristicCallbacks {
   void onRead(BLECharacteristic *characteristic) override {
+    updateStatusCharacteristic(false);
     noteBleDataSent();
   }
 };

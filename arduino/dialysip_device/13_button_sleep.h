@@ -12,11 +12,16 @@ void disarmSleepAfterStableRead() {
   sleepAfterStableReadArmed = false;
 }
 
-bool stableReadSleepReady() {
+bool stableReadFinalizationReady() {
   return sleepAfterStableReadArmed &&
-         mainDisplayVisible &&
-         !bleConnected &&
+         (mainDisplayVisible || bleSyncMode) &&
          (uint32_t)(millis() - stableSensorReadMs) >= SLEEP_AFTER_STABLE_READ_MS;
+}
+
+bool stableReadSleepReady() {
+  return stableReadFinalizationReady() &&
+         !bleConnected &&
+         !bleSyncMode;
 }
 
 bool wakePinsReadyForSleep() {

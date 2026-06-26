@@ -23,6 +23,7 @@ bool secondaryDisplayReturnActive();
 void serviceSecondaryDisplayTimeout();
 void armSleepAfterStableRead();
 void disarmSleepAfterStableRead();
+bool stableReadFinalizationReady();
 bool stableReadSleepReady();
 void enterDeepSleep();
 String buildStatusJson();

@@ -105,6 +105,7 @@ void loop() {
   serviceResetSavedDataTimeout();
   serviceSecondaryDisplayTimeout();
   serviceBleTransferIndicator();
+  serviceAppHeartbeatTimeout();
   updateMainDisplayLive();
   serviceCountdownBar();
 
@@ -125,6 +126,13 @@ void loop() {
     updateStatusCharacteristic(true);
     if (!mainDisplayVisible && !bleSyncMode) {
       armSecondaryDisplayReturn(30000);
+    }
+  }
+
+  if (!calibrationMode && bleConnected && stableReadFinalizationReady()) {
+    disarmSleepAfterStableRead();
+    if (finalizeStableWeightBeforeSleep()) {
+      stableWeightFinalized = true;
     }
   }
 

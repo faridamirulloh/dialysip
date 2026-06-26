@@ -44,11 +44,11 @@ export function DashboardScreen({ snapshot, copy, onSync, onAddManual }: Dashboa
       </View>
       <InfoList
         rows={[
-          [
-            copy.bottleBattery,
-            `${snapshot.device.batteryPercent}%`,
-            snapshot.device.batteryPercent <= 20 ? copy.low : copy.good,
-          ],
+          // [
+          //   copy.bottleBattery,
+          //   `${snapshot.device.batteryPercent}%`,
+          //   snapshot.device.batteryPercent <= 20 ? copy.low : copy.good,
+          // ],
           [
             copy.lastSync,
             localizeKnownLabel(snapshot.device.lastSyncLabel, snapshot.settings.language),

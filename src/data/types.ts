@@ -4,6 +4,14 @@ export type ConnectionState = "connected" | "offline" | "scanning";
 
 export type BleActivity = "send" | "receive";
 
+export interface BleLogEntry {
+  id: number;
+  direction: BleActivity;
+  characteristic: string;
+  payload: string;
+  timestamp: number;
+}
+
 export type CalibrationStep = "idle" | "wait_tare" | "wait_weight" | "live_weight";
 
 export type RecordType =
@@ -120,6 +128,8 @@ export interface DailySipDataSource {
   loadSnapshot(): Promise<DailySipSnapshot>;
   subscribeToLiveSync(onSnapshot: (snapshot: DailySipSnapshot) => void): () => void;
   subscribeToBleActivity(onActivity: (activity: BleActivity) => void): () => void;
+  subscribeToBleLog(onEntry: (entry: BleLogEntry) => void): () => void;
+  setAppActive(isActive: boolean): void;
   autoConnectActiveDevice(): Promise<DailySipSnapshot | null>;
   connectDevice(): Promise<DailySipSnapshot>;
   syncNow(): Promise<DailySipSnapshot>;

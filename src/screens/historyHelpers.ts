@@ -11,8 +11,13 @@ export const warningTone: Record<WarningState, "normal" | "warn" | "danger"> = {
 };
 
 const dailyChartLabels: Record<LanguageCode, string[]> = {
-  en: ["06:00", "09:00", "12:00", "15:00", "Now"],
-  id: ["06:00", "09:00", "12:00", "15:00", "Sekarang"],
+  en: ["06:00", "09:00", "12:00", "15:00", "24:00"],
+  id: ["06:00", "09:00", "12:00", "15:00", "24:00"],
+};
+
+const dailyChartNowLabel: Record<LanguageCode, string> = {
+  en: "Now",
+  id: "Sekarang",
 };
 
 const weeklyChartLabels: Record<LanguageCode, string[]> = {
@@ -20,12 +25,29 @@ const weeklyChartLabels: Record<LanguageCode, string[]> = {
   id: ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"],
 };
 
-export function getHistoryChartLabels(range: HistoryRange, count: number, language: LanguageCode): string[] {
+export function getHistoryChartLabels(
+  range: HistoryRange,
+  count: number,
+  language: LanguageCode,
+  isCurrentDay = false,
+  now = new Date(),
+): string[] {
   if (range === "daily") {
-    return Array.from(
+    const labels = Array.from(
       { length: count },
       (_, index) => dailyChartLabels[language][index] ?? `${String(index + 1).padStart(2, "0")}:00`,
     );
+
+    if (isCurrentDay) {
+      const currentMinute = now.getHours() * 60 + now.getMinutes();
+      const currentRangeIndex = [6, 9, 12, 15, 24].findIndex((hour) => currentMinute <= hour * 60);
+
+      if (currentRangeIndex >= 0 && currentRangeIndex < labels.length) {
+        labels[currentRangeIndex] = dailyChartNowLabel[language];
+      }
+    }
+
+    return labels;
   }
 
   if (range === "weekly") {

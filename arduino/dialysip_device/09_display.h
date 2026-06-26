@@ -246,6 +246,8 @@ void noteBleDataSent() {
 }
 
 void noteBleDataReceived() {
+  bleConnected = true;
+  lastAppBleActivityMs = millis();
   noteBleTransfer(BLE_TRANSFER_RECEIVE);
 }
 

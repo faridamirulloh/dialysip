@@ -536,24 +536,26 @@ export class SqliteDailySipStore {
     const db = await openDatabase();
     const now = unixNow();
 
+    await db.runAsync("DELETE FROM devices");
     await db.runAsync(
-      `UPDATE devices
-        SET device_id = ?,
-            name = ?,
-            display_name = NULL,
-            firmware_version = 'unknown',
-            last_seen_at = NULL,
-            last_synced_record_id = '',
-            battery_percent = 0,
-            connection_state = 'offline',
-            calibrated = 0,
-            rtc_ok = 0,
-            sd_ok = 0,
-            sensor_ok = 0,
-            updated_at = ?
-        WHERE id = (SELECT id FROM devices ORDER BY id ASC LIMIT 1)`,
+      `INSERT INTO devices (
+        device_id,
+        name,
+        firmware_version,
+        last_seen_at,
+        last_synced_record_id,
+        battery_percent,
+        connection_state,
+        calibrated,
+        rtc_ok,
+        sd_ok,
+        sensor_ok,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, 'unknown', NULL, '', 0, 'offline', 0, 0, 0, 0, ?, ?)`,
       DEFAULT_DEVICE_ID,
       DEFAULT_DEVICE_NAME,
+      now,
       now
     );
 
@@ -771,7 +773,7 @@ export class SqliteDailySipStore {
         ignoredMl: totals.ignoredMl,
         limitMl: settings.dailyLimitMl,
         warningState: getWarningState(totals.totalMl, settings, device.battery_percent),
-        chartTotalsMl: buildDailyCumulativeChart(rows, day),
+        chartTotalsMl: buildDailyRangeChart(rows, day),
         records: rows.map(toIntakeRecord)
       });
     }
@@ -1207,18 +1209,21 @@ const getWarningState = (
   return "normal";
 };
 
-const buildDailyCumulativeChart = (rows: IntakeRecordRow[], day: Date) => {
+const buildDailyRangeChart = (rows: IntakeRecordRow[], day: Date) => {
   const bins = [6, 9, 12, 15, 24];
   const activeRows = rows.filter((row) => !row.ignored && isCountedIntakeRow(row));
+  const rangeStartUnix = toUnix(startOfDay(day));
+  const totals = Array.from({ length: bins.length }, () => 0);
 
-  return bins.map((hour) => {
-    const cutoff = addHours(startOfDay(day), hour);
-    const cutoffUnix = toUnix(cutoff);
+  activeRows.forEach((row) => {
+    const bucketIndex = bins.findIndex((hour) => row.timestamp_utc <= toUnix(addHours(day, hour)));
 
-    return activeRows.reduce((sum, row) => {
-      return row.timestamp_utc <= cutoffUnix ? sum + row.amount_ml : sum;
-    }, 0);
+    if (row.timestamp_utc >= rangeStartUnix && bucketIndex >= 0) {
+      totals[bucketIndex] += row.amount_ml;
+    }
   });
+
+  return totals;
 };
 
 const buildMonthlyBuckets = (rows: IntakeRecordRow[], monthStart: Date) => {
