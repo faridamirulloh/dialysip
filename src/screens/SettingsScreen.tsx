@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { View } from "react-native";
 import { showLanguageSetting } from "../constants/settings";
 import type { DailySipSettings, DailySipSnapshot } from "../data/types";
@@ -32,10 +32,6 @@ export function SettingsScreen({
   onRemoveDevice,
 }: SettingsScreenProps) {
   const [draft, setDraft] = useState(snapshot.settings);
-
-  useEffect(() => {
-    setDraft(snapshot.settings);
-  }, [snapshot.settings]);
 
   const setNumber = (
     key: Exclude<keyof DailySipSettings, "language" | "historySyncMode">,

@@ -295,10 +295,14 @@ export class SqliteDailySipStore {
     const db = await openDatabase();
     await this.updateDeviceFromStatus(db, result.status, result.acknowledgedRecordId);
     const changedDates = new Set<string>();
+    let insertedRecords = 0;
 
     for (const record of result.records) {
-      const dateKey = await this.insertSyncedDeviceRecord(db, result.status.deviceId, record);
-      changedDates.add(dateKey);
+      const insertResult = await this.insertSyncedDeviceRecord(db, result.status.deviceId, record);
+      if (insertResult.inserted) {
+        insertedRecords += 1;
+        changedDates.add(insertResult.dateKey);
+      }
     }
 
     if (changedDates.size === 0) {
@@ -311,10 +315,13 @@ export class SqliteDailySipStore {
 
     await this.insertDeviceEvent(db, "sync_complete", {
       acknowledged_record_id: result.acknowledgedRecordId,
-      records_received: result.records.length
+      records_received: result.records.length,
+      records_inserted: insertedRecords
     });
-    this.notice = result.records.length
-      ? `Data riwayat berhasil diambil dari botol. ${result.records.length} catatan baru disimpan.`
+    this.notice = insertedRecords
+      ? `Data riwayat berhasil diambil dari botol. ${insertedRecords} catatan baru disimpan dari ${result.records.length} diterima.`
+      : result.records.length
+        ? `Data riwayat berhasil diambil dari botol. ${result.records.length} catatan diterima, semuanya sudah ada.`
       : "Data riwayat berhasil diambil dari botol. Tidak ada catatan baru.";
     return this.buildSnapshot(db);
   }
@@ -742,31 +749,38 @@ export class SqliteDailySipStore {
     settings: DailySipSettings,
     device: DeviceRow
   ): Promise<DailySipSnapshot["history"]> {
+    const recordDateKeys = await this.readRecordDateKeys(db);
+
     return {
-      daily: await this.buildDailyHistory(db, settings, device),
-      weekly: await this.buildWeeklyHistory(db, settings, device),
-      monthly: await this.buildMonthlyHistory(db, settings, device)
+      daily: await this.buildDailyHistory(db, settings, device, recordDateKeys),
+      weekly: await this.buildWeeklyHistory(db, settings, device, recordDateKeys),
+      monthly: await this.buildMonthlyHistory(db, settings, device, recordDateKeys)
     };
   }
 
   private async buildDailyHistory(
     db: SQLiteDatabase,
     settings: DailySipSettings,
-    device: DeviceRow
+    device: DeviceRow,
+    recordDateKeys: string[]
   ): Promise<HistoryPeriodSummary[]> {
     const today = startOfDay(new Date());
+    const todayKey = toLocalDateKey(today);
+    const dateKeys = uniqueSortedDateKeys([
+      ...Array.from({ length: 7 }, (_, offset) => toLocalDateKey(addDays(today, -offset))),
+      ...recordDateKeys
+    ]);
     const periods: HistoryPeriodSummary[] = [];
 
-    for (let offset = 0; offset < 7; offset += 1) {
-      const day = addDays(today, -offset);
-      const key = toLocalDateKey(day);
+    for (const key of dateKeys) {
+      const day = parseDateKey(key);
       const rows = await this.readRecordsForRange(db, key, key);
       const totals = summarizeRows(rows);
 
       periods.push({
         id: key,
         range: "daily",
-        label: offset === 0 ? todayLabel(settings.language, day) : formatShortDateLabel(day, settings.language),
+        label: key === todayKey ? todayLabel(settings.language, day) : formatShortDateLabel(day, settings.language),
         totalMl: totals.totalMl,
         autoMl: totals.autoMl,
         manualMl: totals.manualMl,
@@ -784,13 +798,17 @@ export class SqliteDailySipStore {
   private async buildWeeklyHistory(
     db: SQLiteDatabase,
     settings: DailySipSettings,
-    device: DeviceRow
+    device: DeviceRow,
+    recordDateKeys: string[]
   ): Promise<HistoryPeriodSummary[]> {
     const currentWeek = startOfWeek(new Date());
+    const weekStarts = uniqueSortedPeriodStarts([
+      ...Array.from({ length: 4 }, (_, offset) => addDays(currentWeek, -offset * 7)),
+      ...recordDateKeys.map((dateKey) => startOfWeek(parseDateKey(dateKey)))
+    ]);
     const periods: HistoryPeriodSummary[] = [];
 
-    for (let offset = 0; offset < 4; offset += 1) {
-      const start = addDays(currentWeek, -offset * 7);
+    for (const start of weekStarts) {
       const end = addDays(start, 6);
       const rows = await this.readRecordsForRange(db, toLocalDateKey(start), toLocalDateKey(end));
       const totals = summarizeRows(rows);
@@ -816,13 +834,17 @@ export class SqliteDailySipStore {
   private async buildMonthlyHistory(
     db: SQLiteDatabase,
     settings: DailySipSettings,
-    device: DeviceRow
+    device: DeviceRow,
+    recordDateKeys: string[]
   ): Promise<HistoryPeriodSummary[]> {
     const currentMonth = startOfMonth(new Date());
+    const monthStarts = uniqueSortedPeriodStarts([
+      ...Array.from({ length: 6 }, (_, offset) => addMonths(currentMonth, -offset)),
+      ...recordDateKeys.map((dateKey) => startOfMonth(parseDateKey(dateKey)))
+    ]);
     const periods: HistoryPeriodSummary[] = [];
 
-    for (let offset = 0; offset < 6; offset += 1) {
-      const start = addMonths(currentMonth, -offset);
+    for (const start of monthStarts) {
       const end = endOfMonth(start);
       const rows = await this.readRecordsForRange(db, toLocalDateKey(start), toLocalDateKey(end));
       const totals = summarizeRows(rows);
@@ -876,6 +898,16 @@ export class SqliteDailySipStore {
       startDate,
       endDate
     );
+  }
+
+  private async readRecordDateKeys(db: SQLiteDatabase): Promise<string[]> {
+    const rows = await db.getAllAsync<{ local_date: string }>(
+      `SELECT DISTINCT local_date
+      FROM intake_records
+      ORDER BY local_date DESC`
+    );
+
+    return rows.map((row) => row.local_date).filter(isDateKey);
   }
 
   private async readDailyTotals(
@@ -1043,13 +1075,13 @@ export class SqliteDailySipStore {
     db: SQLiteDatabase,
     deviceId: string,
     record: SyncedDeviceRecord
-  ) {
+  ): Promise<{ dateKey: string; inserted: boolean }> {
     const timestamp = new Date(record.timestampUtc * 1000);
     const dateKey = toLocalDateKey(timestamp);
     const flags = record.flags ?? [];
     const ignored = record.type === "no_change" ? 1 : 0;
 
-    await db.runAsync(
+    const result = await db.runAsync(
       `INSERT OR IGNORE INTO intake_records (
         id,
         device_id,
@@ -1086,7 +1118,10 @@ export class SqliteDailySipStore {
       unixNow()
     );
 
-    return dateKey;
+    return {
+      dateKey,
+      inserted: getSqliteChangeCount(result) > 0
+    };
   }
 
   private async countUnsyncedRecords(
@@ -1249,14 +1284,21 @@ const parseDateKey = (dateKey: string) => {
   return new Date(year, month - 1, day);
 };
 
+const isDateKey = (dateKey: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    return false;
+  }
+
+  return toLocalDateKey(parseDateKey(dateKey)) === dateKey;
+};
+
 const normalizeDateKey = (dateKey: string) => {
   const trimmed = dateKey.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
     throw new Error("Tanggal harus menggunakan format YYYY-MM-DD.");
   }
 
-  const parsed = parseDateKey(trimmed);
-  if (toLocalDateKey(parsed) !== trimmed) {
+  if (!isDateKey(trimmed)) {
     throw new Error("Tanggal tidak valid.");
   }
 
@@ -1294,6 +1336,27 @@ const addMonths = (date: Date, months: number) =>
   new Date(date.getFullYear(), date.getMonth() + months, 1);
 
 const daysInMonth = (date: Date) => endOfMonth(date).getDate();
+
+const uniqueSortedDateKeys = (dateKeys: string[]) =>
+  Array.from(new Set(dateKeys.filter(isDateKey))).sort().reverse();
+
+const uniqueSortedPeriodStarts = (dates: Date[]) =>
+  Array.from(
+    new Map(
+      dates
+        .filter((date) => !Number.isNaN(date.getTime()))
+        .map((date) => [toLocalDateKey(date), date])
+    ).values()
+  ).sort((left, right) => right.getTime() - left.getTime());
+
+const getSqliteChangeCount = (result: unknown) => {
+  if (typeof result !== "object" || result === null || !("changes" in result)) {
+    return 0;
+  }
+
+  const changes = (result as { changes?: unknown }).changes;
+  return typeof changes === "number" ? changes : 0;
+};
 
 const formatTime = (timestampUtc: number) => {
   const date = new Date(timestampUtc * 1000);
