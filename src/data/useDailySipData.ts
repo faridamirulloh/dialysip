@@ -151,6 +151,8 @@ export const useDailySipData = () => {
       run(() => sourceRef.current.addManualIntake(input)),
     deleteHistoryForDate: (dateKey: string) =>
       run(() => sourceRef.current.deleteHistoryForDate(dateKey)),
+    deleteHistoryRange: (startDateKey: string, endDateKey: string) =>
+      run(() => sourceRef.current.deleteHistoryRange(startDateKey, endDateKey)),
     deleteAllHistory: () => run(() => sourceRef.current.deleteAllHistory()),
     renameDevice: (name: string) => run(() => sourceRef.current.renameDevice(name)),
     removeDevice: () => run(() => sourceRef.current.removeDevice()),

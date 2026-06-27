@@ -215,4 +215,4 @@ const formatWeight = (value: number | null, copy: AppCopy) =>
   value === null ? copy.waitingReading : `${Math.round(value)} g`;
 
 const formatStableFor = (value: number | null, copy: AppCopy) =>
-  value === null ? copy.waitingReading : `${value.toFixed(1)} s`;
+  value === null ? copy.waitingReading : `${value.toFixed(1)} ${copy.secondsShort}`;

@@ -8,10 +8,11 @@ interface NoticeBannerProps {
   text: string;
   tone: "normal" | "warn" | "danger";
   autoHideMs: number;
+  closeLabel: string;
   onClose: () => void;
 }
 
-export function NoticeBanner({ text, tone, autoHideMs, onClose }: NoticeBannerProps) {
+export function NoticeBanner({ text, tone, autoHideMs, closeLabel, onClose }: NoticeBannerProps) {
   const timeoutProgress = useRef(new Animated.Value(1)).current;
   const iconColor = tone === "danger" ? palette.danger : tone === "warn" ? palette.warning : palette.accent;
   const timeoutBarWidth = timeoutProgress.interpolate({
@@ -50,7 +51,7 @@ export function NoticeBanner({ text, tone, autoHideMs, onClose }: NoticeBannerPr
         {text}
       </Text>
       <Pressable
-        accessibilityLabel="Tutup pemberitahuan"
+        accessibilityLabel={closeLabel}
         onPress={onClose}
         style={({ pressed }) => [styles.noticeCloseButton, pressed && styles.secondaryButtonPressed]}
       >

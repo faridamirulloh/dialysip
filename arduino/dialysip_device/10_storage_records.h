@@ -318,8 +318,6 @@ void streamLogsAfter(const String &afterRecordId) {
     delay(40);
   }
 
-  file.close();
-
   if (bleConnected) {
     String completed;
     completed.reserve(72);
@@ -328,6 +326,9 @@ void streamLogsAfter(const String &afterRecordId) {
     completed += "}";
     notifyLogPayload(completed);
   }
+
+  delay(100);
+  file.close();
 }
 
 bool clearHistoryData() {

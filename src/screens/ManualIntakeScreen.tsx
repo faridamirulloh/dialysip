@@ -6,6 +6,7 @@ import type { AppCopy } from "../i18n";
 import { formatCategoryLabel } from "../i18n";
 import { palette } from "../theme";
 import { styles } from "../styles/appStyles";
+import { IconButton } from "../components/IconButton";
 import { MetricCard } from "../components/MetricCard";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ScreenCard } from "../components/ScreenCard";
@@ -19,14 +20,22 @@ interface ManualIntakeScreenProps {
 export function ManualIntakeScreen({ snapshot, copy, onSave }: ManualIntakeScreenProps) {
   const [amountText, setAmountText] = useState("120");
   const [category, setCategory] = useState<IntakeCategory>("Mineral water");
-  const [dateText, setDateText] = useState(formatDateKey(new Date()));
+  const [selectedDate, setSelectedDate] = useState(() => new Date());
+  const [timeText, setTimeText] = useState(formatTimeKey(new Date()));
   const [note, setNote] = useState("");
   const amountMl = Number.parseInt(amountText, 10) || 0;
-  const normalizedDateText = dateText.trim();
-  const dateIsValid = isValidDateKey(normalizedDateText);
+  const normalizedDateText = formatDateKey(selectedDate);
+  const normalizedTimeText = timeText.trim();
+  const timeIsValid = isValidTimeKey(normalizedTimeText);
   const isToday = normalizedDateText === formatDateKey(new Date());
   const totalAfterSave = isToday ? snapshot.summary.totalMl + amountMl : snapshot.summary.totalMl;
   const language = snapshot.settings.language;
+  const changeDateByDays = (days: number) => {
+    setSelectedDate((current) => addDays(current, days));
+  };
+  const changeTimeByMinutes = (minutes: number) => {
+    setTimeText((current) => formatTimeKey(addMinutes(parseTimeKey(current), minutes)));
+  };
 
   return (
     <ScreenCard title={copy.manualTitle} subtitle={copy.manualSubtitle} chip={copy.manual} chipIcon="create-outline">
@@ -58,18 +67,30 @@ export function ManualIntakeScreen({ snapshot, copy, onSave }: ManualIntakeScree
         </View>
       </View>
       <View style={styles.datePanel}>
-        <Text style={styles.inputLabel}>{copy.historyDate}</Text>
-        <TextInput
-          value={dateText}
-          onChangeText={setDateText}
-          placeholder="YYYY-MM-DD"
-          placeholderTextColor={palette.muted}
-          style={[styles.dateInput, !dateIsValid && styles.dateInputInvalid]}
-          accessibilityLabel={copy.historyDateA11y}
-          autoCapitalize="none"
-        />
-        <Text style={[styles.dateHint, !dateIsValid && styles.dateHintInvalid]}>
-          {dateIsValid ? copy.historyDateHint : copy.invalidHistoryDate}
+        <Text style={styles.inputLabel}>{copy.datePicker}</Text>
+        <View style={styles.pickerControlRow}>
+          <IconButton icon="chevron-back-outline" accessibilityLabel={`${copy.previous} ${copy.date}`} onPress={() => changeDateByDays(-1)} />
+          <Text style={styles.pickerValue}>{normalizedDateText}</Text>
+          <IconButton icon="chevron-forward-outline" accessibilityLabel={`${copy.next} ${copy.date}`} onPress={() => changeDateByDays(1)} />
+        </View>
+        <Text style={styles.inputLabel}>{copy.timePicker}</Text>
+        <View style={styles.pickerControlRow}>
+          <IconButton icon="remove-outline" accessibilityLabel={`${copy.decrease} ${copy.time}`} onPress={() => changeTimeByMinutes(-15)} />
+          <TextInput
+            value={timeText}
+            onChangeText={setTimeText}
+            placeholder="HH:mm"
+            placeholderTextColor={palette.muted}
+            style={[styles.clockInput, !timeIsValid ? styles.dateInputInvalid : undefined]}
+            accessibilityLabel={copy.time}
+            autoCapitalize="none"
+            keyboardType="numbers-and-punctuation"
+            maxLength={5}
+          />
+          <IconButton icon="add-outline" accessibilityLabel={`${copy.increase} ${copy.time}`} onPress={() => changeTimeByMinutes(15)} />
+        </View>
+        <Text style={[styles.dateHint, !timeIsValid ? styles.dateHintInvalid : undefined]}>
+          {timeIsValid ? "HH:mm" : copy.invalidTime}
         </Text>
       </View>
       <TextInput
@@ -80,7 +101,7 @@ export function ManualIntakeScreen({ snapshot, copy, onSave }: ManualIntakeScree
         style={styles.noteInput}
       />
       <View style={styles.metricGrid}>
-        <MetricCard label={copy.time} value={copy.now} />
+        <MetricCard label={copy.time} value={normalizedTimeText} />
         <MetricCard
           label={isToday ? copy.todayAfterSave : copy.historyDate}
           value={isToday ? `${totalAfterSave} ml` : normalizedDateText}
@@ -90,8 +111,8 @@ export function ManualIntakeScreen({ snapshot, copy, onSave }: ManualIntakeScree
         <PrimaryButton
           label={copy.saveEntry}
           icon="save-outline"
-          disabled={amountMl <= 0 || !dateIsValid}
-          onPress={() => onSave({ amountMl, category, dateKey: normalizedDateText, note })}
+          disabled={amountMl <= 0 || !timeIsValid}
+          onPress={() => onSave({ amountMl, category, dateKey: normalizedDateText, timeKey: normalizedTimeText, note })}
         />
       </View>
     </ScreenCard>
@@ -105,12 +126,38 @@ const formatDateKey = (date: Date) => {
   return `${year}-${month}-${day}`;
 };
 
-const isValidDateKey = (dateKey: string) => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+const formatTimeKey = (date: Date) =>
+  `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+
+const isValidTimeKey = (timeKey: string) => {
+  if (!/^\d{2}:\d{2}$/.test(timeKey)) {
     return false;
   }
 
-  const [year, month, day] = dateKey.split("-").map(Number);
-  const parsed = new Date(year, month - 1, day);
-  return formatDateKey(parsed) === dateKey;
+  const [hours, minutes] = timeKey.split(":").map(Number);
+  return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
+};
+
+const parseTimeKey = (timeKey: string) => {
+  const fallback = new Date();
+  if (!isValidTimeKey(timeKey)) {
+    fallback.setSeconds(0, 0);
+    return fallback;
+  }
+
+  const [hours, minutes] = timeKey.split(":").map(Number);
+  fallback.setHours(hours, minutes, 0, 0);
+  return fallback;
+};
+
+const addDays = (date: Date, days: number) => {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+};
+
+const addMinutes = (date: Date, minutes: number) => {
+  const next = new Date(date);
+  next.setMinutes(next.getMinutes() + minutes);
+  return next;
 };

@@ -85,6 +85,7 @@ export interface IntakeRecord {
   type: RecordType;
   source: "device_auto" | "manual_app" | "edited_auto";
   amountMl: number;
+  dateKey?: string;
   timeLabel: string;
   title: string;
   detail: string;
@@ -103,7 +104,15 @@ export interface HistoryPeriodSummary {
   limitMl: number;
   warningState: WarningState;
   chartTotalsMl: number[];
+  chartBucketsMl?: HistoryChartBucket[];
   records: IntakeRecord[];
+}
+
+export interface HistoryChartBucket {
+  totalMl: number;
+  autoMl: number;
+  manualMl: number;
+  otherMl: number;
 }
 
 export interface DailySipSnapshot {
@@ -121,6 +130,7 @@ export interface ManualIntakeInput {
   amountMl: number;
   category: IntakeCategory;
   dateKey?: string;
+  timeKey?: string;
   note?: string;
 }
 
@@ -140,6 +150,7 @@ export interface DailySipDataSource {
   finishCalibration(): Promise<DailySipSnapshot>;
   addManualIntake(input: ManualIntakeInput): Promise<DailySipSnapshot>;
   deleteHistoryForDate(dateKey: string): Promise<DailySipSnapshot>;
+  deleteHistoryRange(startDateKey: string, endDateKey: string): Promise<DailySipSnapshot>;
   deleteAllHistory(): Promise<DailySipSnapshot>;
   renameDevice(name: string): Promise<DailySipSnapshot>;
   removeDevice(): Promise<DailySipSnapshot>;

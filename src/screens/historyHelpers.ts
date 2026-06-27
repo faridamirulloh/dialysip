@@ -11,8 +11,8 @@ export const warningTone: Record<WarningState, "normal" | "warn" | "danger"> = {
 };
 
 const dailyChartLabels: Record<LanguageCode, string[]> = {
-  en: ["06:00", "09:00", "12:00", "15:00", "24:00"],
-  id: ["06:00", "09:00", "12:00", "15:00", "24:00"],
+  en: ["06:00", "09:00", "12:00", "15:00", "18:00", "24:00"],
+  id: ["06:00", "09:00", "12:00", "15:00", "18:00", "24:00"],
 };
 
 const dailyChartNowLabel: Record<LanguageCode, string> = {
@@ -40,7 +40,7 @@ export function getHistoryChartLabels(
 
     if (isCurrentDay) {
       const currentMinute = now.getHours() * 60 + now.getMinutes();
-      const currentRangeIndex = [6, 9, 12, 15, 24].findIndex((hour) => currentMinute <= hour * 60);
+      const currentRangeIndex = [6, 9, 12, 15, 18, 24].findIndex((hour) => currentMinute <= hour * 60);
 
       if (currentRangeIndex >= 0 && currentRangeIndex < labels.length) {
         labels[currentRangeIndex] = dailyChartNowLabel[language];

@@ -574,14 +574,14 @@ export const styles = StyleSheet.create({
   },
   secondaryButton: {
     flex: 1,
-    minHeight: 52,
+    minHeight: 40,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
     borderRadius: radius.md,
     backgroundColor: palette.tintStrong,
-    paddingHorizontal: 14,
+    paddingHorizontal: 8,
   },
   secondaryButtonText: {
     color: palette.accent,
@@ -699,6 +699,41 @@ export const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
   },
+  pickerControlRow: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 8,
+    marginBottom: 10,
+  },
+  pickerValue: {
+    flex: 1,
+    minHeight: 44,
+    textAlign: "center",
+    textAlignVertical: "center",
+    borderWidth: 1,
+    borderColor: palette.line,
+    borderRadius: radius.sm,
+    color: palette.ink,
+    backgroundColor: palette.surfaceTint,
+    paddingHorizontal: 12,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  clockInput: {
+    flex: 1,
+    minHeight: 44,
+    textAlign: "center",
+    borderWidth: 1,
+    borderColor: palette.line,
+    borderRadius: radius.sm,
+    color: palette.ink,
+    backgroundColor: palette.surfaceTint,
+    paddingHorizontal: 12,
+    fontSize: 15,
+    fontWeight: "800",
+  },
   dateInputInvalid: {
     borderColor: palette.danger,
     backgroundColor: "#FDEDEB",
@@ -759,6 +794,18 @@ export const styles = StyleSheet.create({
     backgroundColor: palette.surface,
     paddingHorizontal: 14,
   },
+  periodPickerPanel: {
+    borderWidth: 1,
+    borderColor: palette.line,
+    borderRadius: radius.md,
+    backgroundColor: palette.surface,
+    padding: 13,
+    marginBottom: 12,
+  },
+  periodPickerActions: {
+    flexDirection: "row",
+    marginTop: 10,
+  },
   periodType: {
     color: palette.muted,
     fontSize: 12,
@@ -770,31 +817,6 @@ export const styles = StyleSheet.create({
     lineHeight: 22,
     fontWeight: "600",
     marginTop: 2,
-  },
-  periodChipRow: {
-    gap: 8,
-    paddingBottom: 12,
-  },
-  periodChip: {
-    minHeight: 34,
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: palette.line,
-    borderRadius: 999,
-    backgroundColor: palette.surface,
-    paddingHorizontal: 12,
-  },
-  periodChipActive: {
-    borderColor: palette.accent,
-    backgroundColor: palette.tintStrong,
-  },
-  periodChipText: {
-    color: palette.muted,
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  periodChipTextActive: {
-    color: palette.accentDark,
   },
   chartPanel: {
     minHeight: 188,
@@ -901,15 +923,26 @@ export const styles = StyleSheet.create({
     paddingTop: 8,
     overflow: "visible",
   },
-  bar: {
+  barStack: {
     width: "58%",
     minWidth: 9,
     maxWidth: 24,
     borderRadius: 999,
+    overflow: "hidden",
+    backgroundColor: palette.line,
+  },
+  barSegment: {
+    width: "100%",
+    minHeight: 2,
+  },
+  barSegmentAuto: {
     backgroundColor: palette.accent,
   },
-  barManual: {
+  barSegmentManual: {
     backgroundColor: palette.coral,
+  },
+  barSegmentOther: {
+    backgroundColor: palette.warning,
   },
   barSelected: {
     borderWidth: 2,
@@ -943,6 +976,14 @@ export const styles = StyleSheet.create({
   timeline: {
     gap: 14,
     marginTop: 18,
+  },
+  historyDateGroup: {
+    gap: 10,
+  },
+  historyDateHeader: {
+    color: palette.muted,
+    fontSize: 12,
+    fontWeight: "800",
   },
   timelineRow: {
     flexDirection: "row",

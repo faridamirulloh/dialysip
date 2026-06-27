@@ -51,7 +51,7 @@ export default function App() {
     confirmCalibrationAmount,
     finishCalibration,
     addManualIntake,
-    deleteHistoryForDate,
+    deleteHistoryRange,
     deleteAllHistory,
     renameDevice,
     removeDevice,
@@ -230,6 +230,7 @@ export default function App() {
               tone={noticeTone}
               text={noticeText}
               autoHideMs={noticeAutoHideMs}
+              closeLabel={copy.closeNotice}
               onClose={() => setDismissedNoticeText(noticeText)}
             />
           )}
@@ -285,7 +286,7 @@ export default function App() {
                   copy={copy}
                   onRefresh={refreshSnapshot}
                   onSync={syncNow}
-                  onDeleteDate={deleteHistoryForDate}
+                  onDeleteRange={deleteHistoryRange}
                   onDeleteAllHistory={deleteAllHistory}
                 />
               )}

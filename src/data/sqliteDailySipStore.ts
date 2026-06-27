@@ -2,6 +2,7 @@ import type {
   ConnectionState,
   DailySipSettings,
   DailySipSnapshot,
+  HistoryChartBucket,
   HistorySyncMode,
   HistoryPeriodSummary,
   IntakeCategory,
@@ -445,13 +446,15 @@ export class SqliteDailySipStore {
     const db = await openDatabase();
     const nowDate = new Date();
     const dateKey = input.dateKey ? normalizeDateKey(input.dateKey) : toLocalDateKey(nowDate);
+    const timeKey = input.timeKey ? normalizeTimeKey(input.timeKey) : formatTime(toUnix(nowDate));
     const entryDate = parseDateKey(dateKey);
+    const [hours, minutes] = timeKey.split(":").map(Number);
     const entryTimestamp = new Date(
       entryDate.getFullYear(),
       entryDate.getMonth(),
       entryDate.getDate(),
-      nowDate.getHours(),
-      nowDate.getMinutes(),
+      hours,
+      minutes,
       nowDate.getSeconds()
     );
     const now = toUnix(entryTimestamp);
@@ -498,16 +501,36 @@ export class SqliteDailySipStore {
   }
 
   async deleteHistoryForDate(dateKey: string): Promise<DailySipSnapshot> {
-    const db = await openDatabase();
-    const normalizedDateKey = normalizeDateKey(dateKey);
+    return this.deleteHistoryRange(dateKey, dateKey);
+  }
 
-    await db.runAsync("DELETE FROM intake_records WHERE local_date = ?", normalizedDateKey);
-    await db.runAsync("DELETE FROM daily_summaries WHERE date = ?", normalizedDateKey);
+  async deleteHistoryRange(startDateKey: string, endDateKey: string): Promise<DailySipSnapshot> {
+    const db = await openDatabase();
+    const normalizedStartDateKey = normalizeDateKey(startDateKey);
+    const normalizedEndDateKey = normalizeDateKey(endDateKey);
+    if (normalizedStartDateKey > normalizedEndDateKey) {
+      throw new Error("Rentang tanggal tidak valid.");
+    }
+
     await db.runAsync(
-      "DELETE FROM device_events WHERE date(timestamp_utc, 'unixepoch', 'localtime') = ?",
-      normalizedDateKey
+      "DELETE FROM intake_records WHERE local_date >= ? AND local_date <= ?",
+      normalizedStartDateKey,
+      normalizedEndDateKey
     );
-    this.notice = `Riwayat tanggal ${normalizedDateKey} dihapus.`;
+    await db.runAsync(
+      "DELETE FROM daily_summaries WHERE date >= ? AND date <= ?",
+      normalizedStartDateKey,
+      normalizedEndDateKey
+    );
+    await db.runAsync(
+      "DELETE FROM device_events WHERE date(timestamp_utc, 'unixepoch', 'localtime') >= ? AND date(timestamp_utc, 'unixepoch', 'localtime') <= ?",
+      normalizedStartDateKey,
+      normalizedEndDateKey
+    );
+    this.notice =
+      normalizedStartDateKey === normalizedEndDateKey
+        ? `Riwayat tanggal ${normalizedStartDateKey} dihapus.`
+        : `Riwayat ${normalizedStartDateKey} sampai ${normalizedEndDateKey} dihapus.`;
     return this.buildSnapshot(db);
   }
 
@@ -729,7 +752,12 @@ export class SqliteDailySipStore {
     const records = await this.readRecordsForRange(db, dateKey, dateKey);
     const totals = summarizeRows(records);
     const lastIntake = records.find((record) => record.amount_ml > 0 && !record.ignored);
-    const warningState = getWarningState(totals.totalMl, settings, device.battery_percent);
+    const warningState = getWarningState(
+      totals.totalMl,
+      settings.dailyLimitMl,
+      settings.warningThresholdPercent,
+      device.battery_percent
+    );
 
     return {
       localDateLabel: formatDateLabel(parseDateKey(dateKey), settings.language),
@@ -767,16 +795,18 @@ export class SqliteDailySipStore {
   ): Promise<HistoryPeriodSummary[]> {
     const today = startOfDay(new Date());
     const todayKey = toLocalDateKey(today);
-    const dateKeys = uniqueSortedDateKeys([
-      ...Array.from({ length: 7 }, (_, offset) => toLocalDateKey(addDays(today, -offset))),
-      ...recordDateKeys
-    ]);
+    const earliestRecordDate = getEarliestRecordDate(recordDateKeys);
+    const earliestDate = earliestRecordDate && earliestRecordDate <= today
+      ? earliestRecordDate
+      : addDays(today, -6);
+    const dateKeys = buildDateKeyRange(today, earliestDate);
     const periods: HistoryPeriodSummary[] = [];
 
     for (const key of dateKeys) {
       const day = parseDateKey(key);
       const rows = await this.readRecordsForRange(db, key, key);
       const totals = summarizeRows(rows);
+      const chartBucketsMl = buildDailyRangeChartBuckets(rows, day);
 
       periods.push({
         id: key,
@@ -787,8 +817,14 @@ export class SqliteDailySipStore {
         manualMl: totals.manualMl,
         ignoredMl: totals.ignoredMl,
         limitMl: settings.dailyLimitMl,
-        warningState: getWarningState(totals.totalMl, settings, device.battery_percent),
-        chartTotalsMl: buildDailyRangeChart(rows, day),
+        warningState: getWarningState(
+          totals.totalMl,
+          settings.dailyLimitMl,
+          settings.warningThresholdPercent,
+          device.battery_percent
+        ),
+        chartTotalsMl: chartBucketsMl.map((bucket) => bucket.totalMl),
+        chartBucketsMl,
         records: rows.map(toIntakeRecord)
       });
     }
@@ -803,16 +839,18 @@ export class SqliteDailySipStore {
     recordDateKeys: string[]
   ): Promise<HistoryPeriodSummary[]> {
     const currentWeek = startOfWeek(new Date());
-    const weekStarts = uniqueSortedPeriodStarts([
-      ...Array.from({ length: 4 }, (_, offset) => addDays(currentWeek, -offset * 7)),
-      ...recordDateKeys.map((dateKey) => startOfWeek(parseDateKey(dateKey)))
-    ]);
+    const earliestRecordDate = getEarliestRecordDate(recordDateKeys);
+    const earliestWeek = earliestRecordDate && startOfWeek(earliestRecordDate) <= currentWeek
+      ? startOfWeek(earliestRecordDate)
+      : addDays(currentWeek, -21);
+    const weekStarts = buildPeriodStartRange(currentWeek, earliestWeek, (date) => addDays(date, -7));
     const periods: HistoryPeriodSummary[] = [];
 
     for (const start of weekStarts) {
       const end = addDays(start, 6);
       const rows = await this.readRecordsForRange(db, toLocalDateKey(start), toLocalDateKey(end));
       const totals = summarizeRows(rows);
+      const chartBucketsMl = await this.readDailyChartBuckets(db, start, 7);
 
       periods.push({
         id: `${toLocalDateKey(start)}-${toLocalDateKey(end)}`,
@@ -823,8 +861,14 @@ export class SqliteDailySipStore {
         manualMl: totals.manualMl,
         ignoredMl: totals.ignoredMl,
         limitMl: settings.dailyLimitMl * 7,
-        warningState: getWarningState(totals.totalMl, settings, device.battery_percent),
-        chartTotalsMl: await this.readDailyTotals(db, start, 7),
+        warningState: getWarningState(
+          totals.totalMl,
+          settings.dailyLimitMl * 7,
+          settings.warningThresholdPercent,
+          device.battery_percent
+        ),
+        chartTotalsMl: chartBucketsMl.map((bucket) => bucket.totalMl),
+        chartBucketsMl,
         records: rows.map(toIntakeRecord)
       });
     }
@@ -839,16 +883,18 @@ export class SqliteDailySipStore {
     recordDateKeys: string[]
   ): Promise<HistoryPeriodSummary[]> {
     const currentMonth = startOfMonth(new Date());
-    const monthStarts = uniqueSortedPeriodStarts([
-      ...Array.from({ length: 6 }, (_, offset) => addMonths(currentMonth, -offset)),
-      ...recordDateKeys.map((dateKey) => startOfMonth(parseDateKey(dateKey)))
-    ]);
+    const earliestRecordDate = getEarliestRecordDate(recordDateKeys);
+    const earliestMonth = earliestRecordDate && startOfMonth(earliestRecordDate) <= currentMonth
+      ? startOfMonth(earliestRecordDate)
+      : addMonths(currentMonth, -5);
+    const monthStarts = buildPeriodStartRange(currentMonth, earliestMonth, (date) => addMonths(date, -1));
     const periods: HistoryPeriodSummary[] = [];
 
     for (const start of monthStarts) {
       const end = endOfMonth(start);
       const rows = await this.readRecordsForRange(db, toLocalDateKey(start), toLocalDateKey(end));
       const totals = summarizeRows(rows);
+      const chartBucketsMl = buildMonthlyChartBuckets(rows, start);
 
       periods.push({
         id: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}`,
@@ -859,8 +905,14 @@ export class SqliteDailySipStore {
         manualMl: totals.manualMl,
         ignoredMl: totals.ignoredMl,
         limitMl: settings.dailyLimitMl * daysInMonth(start),
-        warningState: getWarningState(totals.totalMl, settings, device.battery_percent),
-        chartTotalsMl: buildMonthlyBuckets(rows, start),
+        warningState: getWarningState(
+          totals.totalMl,
+          settings.dailyLimitMl * daysInMonth(start),
+          settings.warningThresholdPercent,
+          device.battery_percent
+        ),
+        chartTotalsMl: chartBucketsMl.map((bucket) => bucket.totalMl),
+        chartBucketsMl,
         records: rows.map(toIntakeRecord)
       });
     }
@@ -911,17 +963,17 @@ export class SqliteDailySipStore {
     return rows.map((row) => row.local_date).filter(isDateKey);
   }
 
-  private async readDailyTotals(
+  private async readDailyChartBuckets(
     db: SQLiteDatabase,
     startDate: Date,
     days: number
-  ): Promise<number[]> {
+  ): Promise<HistoryChartBucket[]> {
     const endDate = addDays(startDate, days - 1);
     const rows = await db.getAllAsync<DailyTotalRow>(
       `SELECT
         local_date,
         SUM(CASE WHEN ignored = 0 AND (type IN ('drink_auto', 'manual_app') OR source = 'edited_auto') THEN amount_ml ELSE 0 END) AS total_ml,
-        SUM(CASE WHEN ignored = 0 AND source = 'device_auto' AND type = 'drink_auto' THEN amount_ml ELSE 0 END) AS auto_ml,
+        SUM(CASE WHEN ignored = 0 AND (source = 'device_auto' OR source = 'edited_auto') AND type = 'drink_auto' THEN amount_ml ELSE 0 END) AS auto_ml,
         SUM(CASE WHEN ignored = 0 AND source = 'manual_app' AND type = 'manual_app' THEN amount_ml ELSE 0 END) AS manual_ml,
         SUM(CASE WHEN ignored = 1 THEN amount_ml ELSE 0 END) AS ignored_ml
       FROM intake_records
@@ -931,10 +983,10 @@ export class SqliteDailySipStore {
       toLocalDateKey(startDate),
       toLocalDateKey(endDate)
     );
-    const totalsByDate = new Map(rows.map((row) => [row.local_date, row.total_ml ?? 0]));
+    const totalsByDate = new Map(rows.map((row) => [row.local_date, toChartBucket(row)]));
 
     return Array.from({ length: days }, (_, index) =>
-      totalsByDate.get(toLocalDateKey(addDays(startDate, index))) ?? 0
+      totalsByDate.get(toLocalDateKey(addDays(startDate, index))) ?? emptyChartBucket()
     );
   }
 
@@ -943,7 +995,12 @@ export class SqliteDailySipStore {
     const device = await this.readDevice(db);
     const records = await this.readRecordsForRange(db, dateKey, dateKey);
     const totals = summarizeRows(records);
-    const warningState = getWarningState(totals.totalMl, settings, device.battery_percent);
+    const warningState = getWarningState(
+      totals.totalMl,
+      settings.dailyLimitMl,
+      settings.warningThresholdPercent,
+      device.battery_percent
+    );
 
     await db.runAsync(
       `INSERT INTO daily_summaries (
@@ -1172,6 +1229,12 @@ const summarizeRows = (rows: IntakeRecordRow[]) => {
 const isCountedIntakeRow = (row: IntakeRecordRow) =>
   row.type === "drink_auto" || row.type === "manual_app" || row.source === "edited_auto";
 
+const isAutoIntakeRow = (row: IntakeRecordRow) =>
+  (row.source === "device_auto" || row.source === "edited_auto") && row.type === "drink_auto";
+
+const isManualIntakeRow = (row: IntakeRecordRow) =>
+  row.source === "manual_app" && row.type === "manual_app";
+
 const toIntakeRecord = (row: IntakeRecordRow): IntakeRecord => {
   return {
     id: row.id,
@@ -1179,6 +1242,7 @@ const toIntakeRecord = (row: IntakeRecordRow): IntakeRecord => {
     type: row.type,
     source: row.source,
     amountMl: row.amount_ml,
+    dateKey: row.local_date,
     timeLabel: formatTime(row.timestamp_utc),
     title: titleForRecord(row),
     detail: detailForRecord(row),
@@ -1234,46 +1298,82 @@ const isFlagged = (row: IntakeRecordRow) => {
 
 const getWarningState = (
   totalMl: number,
-  settings: DailySipSettings,
+  limitMl: number,
+  warningThresholdPercent: number,
   batteryPercent: number
 ): WarningState => {
   if (batteryPercent > 0 && batteryPercent <= 20) return "low_battery";
-  if (totalMl > settings.dailyLimitMl) return "over_limit";
-  if (totalMl >= settings.dailyLimitMl * (settings.warningThresholdPercent / 100)) {
+  if (totalMl > limitMl) return "over_limit";
+  if (totalMl >= limitMl * (warningThresholdPercent / 100)) {
     return "near_limit";
   }
   return "normal";
 };
 
-const buildDailyRangeChart = (rows: IntakeRecordRow[], day: Date) => {
-  const bins = [6, 9, 12, 15, 24];
+const buildDailyRangeChartBuckets = (rows: IntakeRecordRow[], day: Date): HistoryChartBucket[] => {
+  const bins = [6, 9, 12, 15, 18, 24];
   const activeRows = rows.filter((row) => !row.ignored && isCountedIntakeRow(row));
   const rangeStartUnix = toUnix(startOfDay(day));
-  const totals = Array.from({ length: bins.length }, () => 0);
+  const buckets = Array.from({ length: bins.length }, () => emptyChartBucket());
 
   activeRows.forEach((row) => {
     const bucketIndex = bins.findIndex((hour) => row.timestamp_utc <= toUnix(addHours(day, hour)));
 
     if (row.timestamp_utc >= rangeStartUnix && bucketIndex >= 0) {
-      totals[bucketIndex] += row.amount_ml;
+      addRowToChartBucket(buckets[bucketIndex], row);
     }
   });
 
-  return totals;
+  return buckets;
 };
 
-const buildMonthlyBuckets = (rows: IntakeRecordRow[], monthStart: Date) => {
+const buildMonthlyChartBuckets = (rows: IntakeRecordRow[], monthStart: Date): HistoryChartBucket[] => {
   const bucketCount = Math.ceil(daysInMonth(monthStart) / 7);
-  const buckets = Array.from({ length: bucketCount }, () => 0);
+  const buckets = Array.from({ length: bucketCount }, () => emptyChartBucket());
 
   rows.forEach((row) => {
     if (row.ignored || !isCountedIntakeRow(row)) return;
     const day = parseDateKey(row.local_date).getDate();
     const bucketIndex = Math.min(Math.floor((day - 1) / 7), bucketCount - 1);
-    buckets[bucketIndex] += row.amount_ml;
+    addRowToChartBucket(buckets[bucketIndex], row);
   });
 
   return buckets;
+};
+
+const emptyChartBucket = (): HistoryChartBucket => ({
+  totalMl: 0,
+  autoMl: 0,
+  manualMl: 0,
+  otherMl: 0
+});
+
+const toChartBucket = (row: DailyTotalRow): HistoryChartBucket => {
+  const autoMl = row.auto_ml ?? 0;
+  const manualMl = row.manual_ml ?? 0;
+  const totalMl = row.total_ml ?? 0;
+  return {
+    totalMl,
+    autoMl,
+    manualMl,
+    otherMl: Math.max(totalMl - autoMl - manualMl, 0)
+  };
+};
+
+const addRowToChartBucket = (bucket: HistoryChartBucket, row: IntakeRecordRow) => {
+  bucket.totalMl += row.amount_ml;
+
+  if (isAutoIntakeRow(row)) {
+    bucket.autoMl += row.amount_ml;
+    return;
+  }
+
+  if (isManualIntakeRow(row)) {
+    bucket.manualMl += row.amount_ml;
+    return;
+  }
+
+  bucket.otherMl += row.amount_ml;
 };
 
 const unixNow = () => toUnix(new Date());
@@ -1301,6 +1401,20 @@ const normalizeDateKey = (dateKey: string) => {
 
   if (!isDateKey(trimmed)) {
     throw new Error("Tanggal tidak valid.");
+  }
+
+  return trimmed;
+};
+
+const normalizeTimeKey = (timeKey: string) => {
+  const trimmed = timeKey.trim();
+  if (!/^\d{2}:\d{2}$/.test(trimmed)) {
+    throw new Error("Waktu harus menggunakan format HH:mm.");
+  }
+
+  const [hours, minutes] = trimmed.split(":").map(Number);
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    throw new Error("Waktu tidak valid.");
   }
 
   return trimmed;
@@ -1338,17 +1452,39 @@ const addMonths = (date: Date, months: number) =>
 
 const daysInMonth = (date: Date) => endOfMonth(date).getDate();
 
-const uniqueSortedDateKeys = (dateKeys: string[]) =>
-  Array.from(new Set(dateKeys.filter(isDateKey))).sort().reverse();
+const getEarliestRecordDate = (dateKeys: string[]) => {
+  const sortedDateKeys = dateKeys.filter(isDateKey).sort();
+  return sortedDateKeys[0] ? parseDateKey(sortedDateKeys[0]) : null;
+};
 
-const uniqueSortedPeriodStarts = (dates: Date[]) =>
-  Array.from(
-    new Map(
-      dates
-        .filter((date) => !Number.isNaN(date.getTime()))
-        .map((date) => [toLocalDateKey(date), date])
-    ).values()
-  ).sort((left, right) => right.getTime() - left.getTime());
+const buildDateKeyRange = (latest: Date, earliest: Date) => {
+  const range: string[] = [];
+  let current = startOfDay(latest);
+  const end = startOfDay(earliest);
+
+  while (current >= end) {
+    range.push(toLocalDateKey(current));
+    current = addDays(current, -1);
+  }
+
+  return range;
+};
+
+const buildPeriodStartRange = (
+  latest: Date,
+  earliest: Date,
+  previous: (date: Date) => Date
+) => {
+  const range: Date[] = [];
+  let current = latest;
+
+  while (current >= earliest) {
+    range.push(current);
+    current = previous(current);
+  }
+
+  return range;
+};
 
 const getSqliteChangeCount = (result: unknown) => {
   if (typeof result !== "object" || result === null || !("changes" in result)) {
@@ -1384,7 +1520,8 @@ const formatRelativeTime = (timestampUtc: number | null) => {
     return `${diffHours} hr ago`;
   }
 
-  return `${Math.round(diffHours / 24)} days ago`;
+  const diffDays = Math.round(diffHours / 24);
+  return `${diffDays} ${diffDays === 1 ? "day" : "days"} ago`;
 };
 
 const monthNames = {

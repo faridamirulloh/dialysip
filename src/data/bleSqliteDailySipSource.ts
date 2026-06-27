@@ -193,6 +193,10 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
     return this.store.deleteHistoryForDate(dateKey);
   }
 
+  async deleteHistoryRange(startDateKey: string, endDateKey: string): Promise<DailySipSnapshot> {
+    return this.store.deleteHistoryRange(startDateKey, endDateKey);
+  }
+
   async deleteAllHistory(): Promise<DailySipSnapshot> {
     return this.store.deleteAllHistory();
   }

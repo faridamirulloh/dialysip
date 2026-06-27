@@ -79,8 +79,8 @@ export const appCopy = {
     manualAmountA11y: "Manual intake amount in milliliters",
     historyDate: "History date",
     historyDateA11y: "History date in YYYY-MM-DD format",
-    historyDateHint: "Use YYYY-MM-DD",
     invalidHistoryDate: "Use a valid YYYY-MM-DD date",
+    invalidTime: "Use a valid HH:mm time",
     note: "Note",
     time: "Time",
     now: "Now",
@@ -88,26 +88,29 @@ export const appCopy = {
     saveEntry: "Save entry",
     historyTitle: "History",
     refreshHistory: "Refresh",
+    selectPeriod: "Select period",
+    showPeriod: "Show",
+    periodDateHint: "Use YYYY-MM-DD. Week and month use the date inside that period.",
+    periodNotFound: "No saved period contains that date.",
+    removeSelectedHistory: "Remove selected",
+    confirmRemoveSelectedHistory: "Confirm selected",
+    removeAllHistories: "Remove all histories",
+    datePicker: "Date picker",
+    timePicker: "Clock",
     date: "Date",
     week: "Week",
     month: "Month",
     previous: "Previous",
     chartBottle: "Bottle",
-    chartManualHeavy: "Manual-heavy",
     total: "Total",
     limit: "Limit",
-    auto: "Auto",
+    auto: "Bottle",
     flag: "Flag",
     marker: "Marker",
     ok: "OK",
     noRecordsFor: "No records for this",
     historyActions: "Manage history",
-    deleteSelectedDate: "Delete this date",
-    deleteAllHistory: "Delete all history",
-    confirmDeleteSelectedDate: "Confirm date delete",
     confirmDeleteAllHistory: "Confirm all delete",
-    deleteSelectedDateHint: "Removes records on the specified date.",
-    deleteAllHistoryHint: "Removes every saved history record.",
     settingsTitle: "Settings",
     settingsSubtitle: "Configured with clinic guidance",
     dailyLimit: "Daily limit",
@@ -140,6 +143,7 @@ export const appCopy = {
     navAdd: "Add",
     navHistory: "History",
     navSettings: "Settings",
+    closeNotice: "Close notification",
   },
   id: {
     loading: "Memuat DialySip",
@@ -217,8 +221,8 @@ export const appCopy = {
     manualAmountA11y: "Jumlah asupan manual dalam mililiter",
     historyDate: "Tanggal riwayat",
     historyDateA11y: "Tanggal riwayat dalam format YYYY-MM-DD",
-    historyDateHint: "Gunakan YYYY-MM-DD",
     invalidHistoryDate: "Gunakan tanggal valid YYYY-MM-DD",
+    invalidTime: "Gunakan waktu valid HH:mm",
     note: "Catatan",
     time: "Waktu",
     now: "Sekarang",
@@ -226,26 +230,29 @@ export const appCopy = {
     saveEntry: "Simpan entri",
     historyTitle: "Riwayat",
     refreshHistory: "Segarkan",
+    selectPeriod: "Pilih periode",
+    showPeriod: "Tampilkan",
+    periodDateHint: "Gunakan YYYY-MM-DD. Minggu dan bulan memakai tanggal di dalam periode itu.",
+    periodNotFound: "Tidak ada periode tersimpan untuk tanggal itu.",
+    removeSelectedHistory: "Hapus terpilih",
+    confirmRemoveSelectedHistory: "Konfirmasi terpilih",
+    removeAllHistories: "Hapus semua riwayat",
+    datePicker: "Pilih tanggal",
+    timePicker: "Jam",
     date: "Tanggal",
     week: "Minggu",
     month: "Bulan",
     previous: "Sebelumnya",
     chartBottle: "Botol",
-    chartManualHeavy: "Dominan manual",
     total: "Total",
     limit: "Batas",
-    auto: "Otomatis",
+    auto: "Botol",
     flag: "Tandai",
     marker: "Penanda",
     ok: "OK",
     noRecordsFor: "Belum ada catatan untuk",
     historyActions: "Kelola riwayat",
-    deleteSelectedDate: "Hapus tanggal ini",
-    deleteAllHistory: "Hapus semua riwayat",
-    confirmDeleteSelectedDate: "Konfirmasi tanggal",
     confirmDeleteAllHistory: "Konfirmasi semua",
-    deleteSelectedDateHint: "Menghapus catatan pada tanggal yang ditentukan.",
-    deleteAllHistoryHint: "Menghapus seluruh catatan riwayat tersimpan.",
     settingsTitle: "Pengaturan",
     settingsSubtitle: "Diatur sesuai arahan klinik",
     dailyLimit: "Batas harian",
@@ -278,6 +285,7 @@ export const appCopy = {
     navAdd: "Tambah",
     navHistory: "Riwayat",
     navSettings: "Pengaturan",
+    closeNotice: "Tutup pemberitahuan",
   },
 } as const;
 
@@ -299,15 +307,15 @@ export const historyRangeLabels: Record<LanguageCode, Record<HistoryRange, strin
 export const warningLabels: Record<LanguageCode, Record<WarningState, string>> = {
   en: {
     normal: "Normal",
-    near_limit: "Near daily limit",
-    over_limit: "Over today's configured limit",
+    near_limit: "Near the limit",
+    over_limit: "Over the limit",
     low_battery: "Battery low",
     device_error: "Device error",
   },
   id: {
     normal: "Normal",
-    near_limit: "Mendekati batas harian",
-    over_limit: "Melebihi batas hari ini yang dikonfigurasi",
+    near_limit: "Mendekati batas",
+    over_limit: "Melebihi batas",
     low_battery: "Baterai rendah",
     device_error: "Gangguan perangkat",
   },
@@ -315,7 +323,7 @@ export const warningLabels: Record<LanguageCode, Record<WarningState, string>> =
 
 const categoryLabels: Record<LanguageCode, Record<IntakeCategory, string>> = {
   en: {
-    "Mineral water": "Medicine water",
+    "Mineral water": "Mineral water",
     Tea: "Tea",
     Soup: "Soup",
     "Other fluid": "Other fluid",
@@ -334,6 +342,7 @@ const knownLabelTranslations: Record<LanguageCode, Record<string, string>> = {
     "4 min ago": "4 menit lalu",
     "Just now": "Baru saja",
     "Not synced": "Belum sinkron",
+    Never: "Belum pernah",
     "No records": "Belum ada catatan",
     "Friday, June 5": "Jumat, 5 Juni",
     Today: "Hari ini",
@@ -355,9 +364,11 @@ const knownLabelTranslations: Record<LanguageCode, Record<string, string>> = {
 const recordTitleTranslations: Record<LanguageCode, Record<string, string>> = {
   en: {},
   id: {
-    "Drink auto": "Minum otomatis",
+    "Drink auto": "Minum",
+    "Mineral water": "Air mineral",
     Tea: "Teh",
     Soup: "Sup",
+    "Other fluid": "Cairan lain",
     Refill: "Isi ulang",
     "Suspicious change": "Perubahan mencurigakan",
   },
@@ -403,6 +414,23 @@ export function formatCategoryLabel(category: IntakeCategory, language: Language
 }
 
 export function localizeKnownLabel(value: string, language: LanguageCode): string {
+  if (language === "id") {
+    const minutesMatch = value.match(/^(\d+) min ago$/);
+    if (minutesMatch) {
+      return `${minutesMatch[1]} menit lalu`;
+    }
+
+    const hoursMatch = value.match(/^(\d+) hr ago$/);
+    if (hoursMatch) {
+      return `${hoursMatch[1]} jam lalu`;
+    }
+
+    const daysMatch = value.match(/^(\d+) days? ago$/);
+    if (daysMatch) {
+      return `${daysMatch[1]} hari lalu`;
+    }
+  }
+
   return knownLabelTranslations[language][value] ?? value;
 }
 
@@ -429,16 +457,16 @@ export function localizeNotice(text: string, language: LanguageCode): string {
     return `Kalibrasi tersimpan lokal dengan jumlah acuan ${localCalibrationMatch[1]}.`;
   }
 
-  const manualMatch = text.match(/^(Tea|Soup|Medicine water|Outside drink|Other fluid) added to today's total\.$/);
+  const manualMatch = text.match(/^(Mineral water|Tea|Soup|Medicine water|Outside drink|Other fluid) added to today's total\.$/);
   if (manualMatch) {
-    return `${formatCategoryLabel(manualMatch[1] as IntakeCategory, language)} ditambahkan ke total hari ini.`;
+    return `${formatNoticeCategoryLabel(manualMatch[1], language)} ditambahkan ke total hari ini.`;
   }
 
   const datedManualMatch = text.match(
-    /^(Tea|Soup|Medicine water|Outside drink|Other fluid) added to (\d{4}-\d{2}-\d{2})\.$/,
+    /^(Mineral water|Tea|Soup|Medicine water|Outside drink|Other fluid) added to (\d{4}-\d{2}-\d{2})\.$/,
   );
   if (datedManualMatch) {
-    return `${formatCategoryLabel(datedManualMatch[1] as IntakeCategory, language)} ditambahkan ke ${datedManualMatch[2]}.`;
+    return `${formatNoticeCategoryLabel(datedManualMatch[1], language)} ditambahkan ke ${datedManualMatch[2]}.`;
   }
 
   const connectedMatch = text.match(/^Connected to (.+)\. Phone time was synced\.$/);
@@ -453,3 +481,15 @@ export function localizeNotice(text: string, language: LanguageCode): string {
 
   return noticeTranslations[text] ?? text;
 }
+
+const formatNoticeCategoryLabel = (category: string, language: LanguageCode) => {
+  if (category === "Medicine water") {
+    return formatCategoryLabel("Mineral water", language);
+  }
+
+  if (category === "Outside drink") {
+    return language === "id" ? "Minuman luar" : "Outside drink";
+  }
+
+  return formatCategoryLabel(category as IntakeCategory, language);
+};

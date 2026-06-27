@@ -15,12 +15,13 @@ const wait = async () => {
 
 const getWarningState = (
   totalMl: number,
-  settings: DailySipSettings,
+  limitMl: number,
+  warningThresholdPercent: number,
   batteryPercent: number
 ): WarningState => {
   if (batteryPercent <= 20) return "low_battery";
-  if (totalMl > settings.dailyLimitMl) return "over_limit";
-  if (totalMl >= settings.dailyLimitMl * (settings.warningThresholdPercent / 100)) {
+  if (totalMl > limitMl) return "over_limit";
+  if (totalMl >= limitMl * (warningThresholdPercent / 100)) {
     return "near_limit";
   }
   return "normal";
@@ -29,15 +30,24 @@ const getWarningState = (
 const recalculate = (snapshot: DailySipSnapshot): DailySipSnapshot => {
   const totalMl = snapshot.summary.autoMl + snapshot.summary.manualMl;
   const remainingMl = Math.max(snapshot.settings.dailyLimitMl - totalMl, 0);
-  const warningState = getWarningState(totalMl, snapshot.settings, snapshot.device.batteryPercent);
+  const warningState = getWarningState(
+    totalMl,
+    snapshot.settings.dailyLimitMl,
+    snapshot.settings.warningThresholdPercent,
+    snapshot.device.batteryPercent
+  );
   const currentDaily = snapshot.history.daily[0];
   const currentWeekly = snapshot.history.weekly[0];
   const currentMonthly = snapshot.history.monthly[0];
   const weeklyChart = [...currentWeekly.chartTotalsMl];
   const monthlyChart = [...currentMonthly.chartTotalsMl];
+  const weeklyLimitMl = snapshot.settings.dailyLimitMl * 7;
+  const monthlyLimitMl = snapshot.settings.dailyLimitMl * 30;
 
   weeklyChart[weeklyChart.length - 1] = totalMl;
   monthlyChart[6] = totalMl;
+  const weeklyTotalMl = weeklyChart.reduce((sum, value) => sum + value, 0);
+  const monthlyTotalMl = monthlyChart.reduce((sum, value) => sum + value, 0);
 
   const updatedDaily = {
     ...currentDaily,
@@ -52,19 +62,31 @@ const recalculate = (snapshot: DailySipSnapshot): DailySipSnapshot => {
 
   const updatedWeekly = {
     ...currentWeekly,
-    totalMl: weeklyChart.reduce((sum, value) => sum + value, 0),
+    totalMl: weeklyTotalMl,
     autoMl: currentWeekly.autoMl - currentDaily.autoMl + snapshot.summary.autoMl,
     manualMl: currentWeekly.manualMl - currentDaily.manualMl + snapshot.summary.manualMl,
-    limitMl: snapshot.settings.dailyLimitMl * 7,
+    limitMl: weeklyLimitMl,
+    warningState: getWarningState(
+      weeklyTotalMl,
+      weeklyLimitMl,
+      snapshot.settings.warningThresholdPercent,
+      snapshot.device.batteryPercent
+    ),
     chartTotalsMl: weeklyChart
   };
 
   const updatedMonthly = {
     ...currentMonthly,
-    totalMl: monthlyChart.reduce((sum, value) => sum + value, 0),
+    totalMl: monthlyTotalMl,
     autoMl: currentMonthly.autoMl - currentDaily.autoMl + snapshot.summary.autoMl,
     manualMl: currentMonthly.manualMl - currentDaily.manualMl + snapshot.summary.manualMl,
-    limitMl: snapshot.settings.dailyLimitMl * 30,
+    limitMl: monthlyLimitMl,
+    warningState: getWarningState(
+      monthlyTotalMl,
+      monthlyLimitMl,
+      snapshot.settings.warningThresholdPercent,
+      snapshot.device.batteryPercent
+    ),
     chartTotalsMl: monthlyChart
   };
 
@@ -226,7 +248,8 @@ export class DemoDailySipSource implements DailySipDataSource {
       type: "manual_app" as const,
       source: "manual_app" as const,
       amountMl: input.amountMl,
-      timeLabel: "Now",
+      dateKey: input.dateKey,
+      timeLabel: input.timeKey ?? "Now",
       title: input.category,
       detail: input.note?.trim() ? input.note.trim() : "Manual app entry"
     };
@@ -250,6 +273,18 @@ export class DemoDailySipSource implements DailySipDataSource {
     this.snapshot = {
       ...this.snapshot,
       notice: `Riwayat tanggal ${dateKey} dihapus.`
+    };
+    return this.snapshot;
+  }
+
+  async deleteHistoryRange(startDateKey: string, endDateKey: string) {
+    await wait();
+    this.snapshot = {
+      ...this.snapshot,
+      notice:
+        startDateKey === endDateKey
+          ? `Riwayat tanggal ${startDateKey} dihapus.`
+          : `Riwayat ${startDateKey} sampai ${endDateKey} dihapus.`
     };
     return this.snapshot;
   }
