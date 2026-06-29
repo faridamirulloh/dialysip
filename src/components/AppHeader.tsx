@@ -16,14 +16,7 @@ interface AppHeaderProps {
   onCalibration: () => void;
 }
 
-export function AppHeader({
-  isBusy,
-  isDeviceConnected,
-  bleActivity,
-  copy,
-  onPair,
-  onCalibration
-}: AppHeaderProps) {
+export function AppHeader({ isBusy, isDeviceConnected, bleActivity, copy, onPair, onCalibration }: AppHeaderProps) {
   return (
     <View style={styles.header}>
       <View>
@@ -52,7 +45,7 @@ export function AppHeader({
             ) : null}
           </View>
         </View>
-        <IconButton icon="scale-outline" accessibilityLabel={copy.openCalibration} onPress={onCalibration} />
+        {/* <IconButton icon="scale-outline" accessibilityLabel={copy.openCalibration} onPress={onCalibration} /> */}
       </View>
     </View>
   );

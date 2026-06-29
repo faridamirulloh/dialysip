@@ -7,7 +7,8 @@ import type {
   DailySipDataSource,
   DailySipSettings,
   DailySipSnapshot,
-  ManualIntakeInput
+  DiscoveredBottle,
+  ManualIntakeInput,
 } from "./types";
 
 export class BleSqliteDailySipSource implements DailySipDataSource {
@@ -114,7 +115,31 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
       }
       return this.store.applyBleStatus(
         connection.status,
-        "Terhubung ke botol. Riwayat belum berhasil diambil; tekan Sinkron riwayat."
+        "Terhubung ke botol. Riwayat belum berhasil diambil; tekan Sinkron riwayat.",
+      );
+    } catch (caught) {
+      return this.store.recordBleError(getErrorMessage(caught));
+    }
+  }
+
+  async scanBottles(): Promise<DiscoveredBottle[]> {
+    return this.ble.scanBottles();
+  }
+
+  async registerBottle(scanId: string): Promise<DailySipSnapshot> {
+    this.clearLiveSyncMonitor();
+    try {
+      const connection = await this.ble.connectToScannedBottle(scanId);
+      const connectedSnapshot = await this.store.applyBleConnection(connection);
+      this.publishSnapshot(connectedSnapshot);
+      const syncedSnapshot = await this.syncConnectedDevice();
+      void this.ensureLiveSyncMonitor();
+      if (syncedSnapshot) {
+        return syncedSnapshot;
+      }
+      return this.store.applyBleStatus(
+        connection.status,
+        "Terhubung ke botol. Riwayat belum berhasil diambil; tekan Sinkron riwayat.",
       );
     } catch (caught) {
       return this.store.recordBleError(getErrorMessage(caught));
@@ -132,6 +157,21 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
       const message = getErrorMessage(caught);
       const connectedSnapshot = await this.applySyncErrorIfStillConnected(message);
       return connectedSnapshot ?? this.store.recordBleError(message);
+    }
+  }
+
+  async syncDeviceTime(): Promise<DailySipSnapshot> {
+    try {
+      const snapshot = await this.store.loadSnapshot();
+      const expectedDeviceId = isRegisteredDeviceId(snapshot.device.deviceId)
+        ? snapshot.device.deviceId
+        : undefined;
+      const status = await this.ble.syncDeviceTime(expectedDeviceId);
+      const nextSnapshot = await this.store.applyBleStatus(status, "Bottle time synced.");
+      void this.ensureLiveSyncMonitor();
+      return nextSnapshot;
+    } catch (caught) {
+      return this.store.recordBleError(getErrorMessage(caught));
     }
   }
 
@@ -154,12 +194,22 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
     }
   }
 
+  async refreshLiveWeight(): Promise<DailySipSnapshot> {
+    try {
+      await this.ble.sendCommand("refresh_weight");
+      const status = await this.ble.readDeviceStatus();
+      return this.store.applyBleStatus(status);
+    } catch (caught) {
+      return this.store.recordBleError(getErrorMessage(caught));
+    }
+  }
+
   async saveTare(): Promise<DailySipSnapshot> {
     try {
       await this.ble.sendCommand("tare");
       const status = await this.ble.readDeviceStatus();
-      await this.store.recordPendingBleCommand("tare", {}, "Perintah tare dikirim ke botol.");
-      return this.store.applyBleStatus(status, "Perintah tare dikirim ke botol.");
+      await this.store.recordPendingBleCommand("tare", {}, "Perintah tara dikirim ke botol.");
+      return this.store.applyBleStatus(status, "Perintah tara dikirim ke botol.");
     } catch (caught) {
       return this.store.recordBleError(getErrorMessage(caught));
     }
@@ -167,9 +217,19 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
 
   async confirmCalibrationAmount(amountMl: number): Promise<DailySipSnapshot> {
     try {
-      await this.ble.sendCommand("finish_calibration", { known_amount_ml: amountMl });
+      await this.ble.sendCommand("calibrate_known_weight", { known_amount_ml: amountMl });
       const status = await this.ble.readDeviceStatus();
       return this.store.confirmCalibrationAmount(amountMl, status);
+    } catch (caught) {
+      return this.store.recordBleError(getErrorMessage(caught));
+    }
+  }
+
+  async resetCalibrationToDefault(): Promise<DailySipSnapshot> {
+    try {
+      await this.ble.sendCommand("reset_calibration_default");
+      const status = await this.ble.readDeviceStatus();
+      return this.store.applyBleStatus(status, "Calibration reset to default.");
     } catch (caught) {
       return this.store.recordBleError(getErrorMessage(caught));
     }
@@ -183,6 +243,14 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
     } catch (caught) {
       return this.store.recordBleError(getErrorMessage(caught));
     }
+  }
+
+  async saveCupCalibration(cupWeightTenthsG: number): Promise<DailySipSnapshot> {
+    const snapshot = await this.store.loadSnapshot();
+    return this.updateSettings({
+      ...snapshot.settings,
+      cupWeightTenthsG,
+    });
   }
 
   async addManualIntake(input: ManualIntakeInput): Promise<DailySipSnapshot> {
@@ -218,7 +286,12 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
   }
 
   async updateSettings(settings: DailySipSettings): Promise<DailySipSnapshot> {
-    return this.store.updateSettings(settings);
+    const snapshot = await this.store.updateSettings(settings);
+    await this.ble.writeSettingsIfConnected({
+      ...snapshot.settings,
+      overLimitThresholdPercent: 100,
+    });
+    return snapshot;
   }
 
   private async syncConnectedDevice(): Promise<DailySipSnapshot | null> {
@@ -246,10 +319,10 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
         afterRecordId,
         {
           ...snapshot.settings,
-          overLimitThresholdPercent: 100
+          overLimitThresholdPercent: 100,
         },
         historyMode,
-        toFallbackStatus(snapshot)
+        toFallbackStatus(snapshot),
       )
       .finally(() => {
         if (this.historySyncInProgress === syncPromise) {
@@ -266,14 +339,15 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
       return this.liveSyncStarting;
     }
 
-    this.liveSyncStarting = this.ble.monitorLiveRecords(
-      (records) => {
-        void this.applyLiveRecords(records).catch(() => undefined);
-      },
-      () => {
-        this.clearLiveSyncMonitor();
-      }
-    )
+    this.liveSyncStarting = this.ble
+      .monitorLiveRecords(
+        (records) => {
+          void this.applyLiveRecords(records).catch(() => undefined);
+        },
+        () => {
+          this.clearLiveSyncMonitor();
+        },
+      )
       .then((subscription) => {
         if (!this.appActive) {
           subscription.remove();
@@ -301,7 +375,7 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
     const snapshot = await this.store.applyBleSync({
       status,
       records,
-      acknowledgedRecordId
+      acknowledgedRecordId,
     });
 
     if (acknowledgedRecordId) {
@@ -318,10 +392,7 @@ export class BleSqliteDailySipSource implements DailySipDataSource {
         return null;
       }
 
-      const snapshot = await this.store.applyBleStatus(
-        status,
-        `Riwayat belum berhasil diambil dari botol: ${message}`
-      );
+      const snapshot = await this.store.applyBleStatus(status, `Riwayat belum berhasil diambil dari botol: ${message}`);
       this.publishSnapshot(snapshot);
       return snapshot;
     } catch {
@@ -359,15 +430,17 @@ const toFallbackStatus = (snapshot: DailySipSnapshot): SyncedDeviceStatus => ({
   firmwareVersion: snapshot.device.firmwareVersion,
   connection: "connected",
   batteryPercent: snapshot.device.batteryPercent,
+  chargerConnected: snapshot.device.chargerConnected,
   lastRecordId: snapshot.device.lastRecordId,
   currentWeightG: snapshot.device.currentWeightG,
   stableForSeconds: snapshot.device.stableForSeconds,
   calibrationActive: snapshot.device.calibrationActive,
   calibrationStep: snapshot.device.calibrationStep,
+  calibrationFactor: snapshot.device.calibrationFactor,
   calibrated: snapshot.device.calibrated,
   rtcOk: snapshot.device.rtcOk,
   storageOk: snapshot.device.storageOk,
   sdOk: snapshot.device.sdOk,
   sensorOk: snapshot.device.sensorOk,
-  lastSyncId: snapshot.device.lastRecordId
+  lastSyncId: snapshot.device.lastRecordId,
 });

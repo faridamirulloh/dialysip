@@ -17,7 +17,7 @@ type SQLiteModule = typeof import("expo-sqlite");
 type SQLiteDatabase = Awaited<ReturnType<SQLiteModule["openDatabaseAsync"]>>;
 
 const DATABASE_NAME = "dialysip.db";
-const DATABASE_VERSION = 5;
+const DATABASE_VERSION = 8;
 const DEFAULT_DEVICE_ID = "dialysip-local";
 const DEFAULT_DEVICE_NAME = "DialySip";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -29,8 +29,11 @@ interface SettingsRow {
   warning_threshold_percent: number;
   oled_timeout_seconds: number;
   ble_sync_window_seconds: number;
+  stable_save_seconds: number;
   history_sync_mode: HistorySyncMode | null;
   history_retention_days: number;
+  cup_weight_tenths_g: number;
+  cup_tolerance_tenths_g: number;
   language: DailySipSettings["language"];
 }
 
@@ -42,6 +45,7 @@ interface DeviceRow {
   last_synced_record_id: string | number | null;
   battery_percent: number;
   connection_state: ConnectionState;
+  calibration_factor: number | null;
   calibrated: number;
   rtc_ok: number;
   sd_ok: number;
@@ -118,6 +122,7 @@ const migrateDatabase = async (db: SQLiteDatabase) => {
       last_synced_record_id TEXT NOT NULL DEFAULT '',
       battery_percent INTEGER NOT NULL DEFAULT 0,
       connection_state TEXT NOT NULL DEFAULT 'offline',
+      calibration_factor REAL,
       calibrated INTEGER NOT NULL DEFAULT 0,
       rtc_ok INTEGER NOT NULL DEFAULT 0,
       sd_ok INTEGER NOT NULL DEFAULT 0,
@@ -176,8 +181,11 @@ const migrateDatabase = async (db: SQLiteDatabase) => {
       warning_threshold_percent INTEGER NOT NULL,
       oled_timeout_seconds INTEGER NOT NULL,
       ble_sync_window_seconds INTEGER NOT NULL,
+      stable_save_seconds INTEGER NOT NULL DEFAULT 60,
       history_sync_mode TEXT NOT NULL DEFAULT 'after_last_sync',
       history_retention_days INTEGER NOT NULL DEFAULT 10,
+      cup_weight_tenths_g INTEGER NOT NULL DEFAULT 525,
+      cup_tolerance_tenths_g INTEGER NOT NULL DEFAULT 30,
       language TEXT NOT NULL,
       timezone TEXT NOT NULL,
       updated_at INTEGER NOT NULL
@@ -206,6 +214,34 @@ const migrateDatabase = async (db: SQLiteDatabase) => {
     await addColumnIfMissing(db, "devices", "display_name", "TEXT");
   }
 
+  if (currentVersion > 0 && currentVersion < 6) {
+    await addColumnIfMissing(
+      db,
+      "app_settings",
+      "cup_weight_tenths_g",
+      "INTEGER NOT NULL DEFAULT 525"
+    );
+    await addColumnIfMissing(
+      db,
+      "app_settings",
+      "cup_tolerance_tenths_g",
+      "INTEGER NOT NULL DEFAULT 30"
+    );
+  }
+
+  if (currentVersion > 0 && currentVersion < 7) {
+    await addColumnIfMissing(
+      db,
+      "app_settings",
+      "stable_save_seconds",
+      "INTEGER NOT NULL DEFAULT 60"
+    );
+  }
+
+  if (currentVersion > 0 && currentVersion < 8) {
+    await addColumnIfMissing(db, "devices", "calibration_factor", "REAL");
+  }
+
   const now = unixNow();
   await db.runAsync(
     `INSERT OR IGNORE INTO app_settings (
@@ -214,12 +250,15 @@ const migrateDatabase = async (db: SQLiteDatabase) => {
       warning_threshold_percent,
       oled_timeout_seconds,
       ble_sync_window_seconds,
+      stable_save_seconds,
       history_sync_mode,
       history_retention_days,
+      cup_weight_tenths_g,
+      cup_tolerance_tenths_g,
       language,
       timezone,
       updated_at
-    ) VALUES (1, 1000, 80, 15, 60, 'after_last_sync', 10, 'id', 'local', ?)`,
+    ) VALUES (1, 1000, 80, 15, 60, 60, 'after_last_sync', 10, 525, 30, 'id', 'local', ?)`,
     now
   );
   await db.runAsync(
@@ -411,32 +450,24 @@ export class SqliteDailySipStore {
       DEFAULT_DEVICE_ID
     );
     await this.insertDeviceEvent(db, "sync_requested", { requested_at: now });
-    this.notice = "Database lokal sudah diperiksa. Sinkron log BLE akan dipasang ke langkah ini berikutnya.";
+    this.notice = "Database lokal sudah diperiksa. Sinkron catatan BLE akan dipasang ke langkah ini berikutnya.";
     return this.buildSnapshot(db);
   }
 
   async saveTare(): Promise<DailySipSnapshot> {
     const db = await openDatabase();
     await this.insertDeviceEvent(db, "tare", { mode: "app_command" });
-    this.notice = "Perintah tare tersimpan lokal. Pengiriman perintah BLE adalah langkah berikutnya.";
+    this.notice = "Perintah tara tersimpan lokal. Pengiriman perintah BLE adalah langkah berikutnya.";
     return this.buildSnapshot(db);
   }
 
   async confirmCalibrationAmount(amountMl: number, status?: SyncedDeviceStatus): Promise<DailySipSnapshot> {
     const db = await openDatabase();
-    const now = unixNow();
 
     if (status) {
-      await this.updateDeviceFromStatus(db, { ...status, calibrated: true });
+      await this.updateDeviceFromStatus(db, status);
     }
 
-    await db.runAsync(
-      `UPDATE devices
-        SET calibrated = 1,
-            updated_at = ?
-        WHERE id = (SELECT id FROM devices ORDER BY id ASC LIMIT 1)`,
-      now
-    );
     await this.insertDeviceEvent(db, "calibration", { known_amount_ml: amountMl });
     this.notice = `Kalibrasi tersimpan lokal dengan jumlah acuan ${amountMl} ml.`;
     return this.buildSnapshot(db);
@@ -547,7 +578,7 @@ export class SqliteDailySipStore {
   async renameDevice(name: string): Promise<DailySipSnapshot> {
     const displayName = name.trim().slice(0, 48);
     if (!displayName) {
-      throw new Error("Bottle name cannot be empty.");
+      throw new Error("Nama botol tidak boleh kosong.");
     }
 
     const db = await openDatabase();
@@ -577,13 +608,14 @@ export class SqliteDailySipStore {
         last_synced_record_id,
         battery_percent,
         connection_state,
+        calibration_factor,
         calibrated,
         rtc_ok,
         sd_ok,
         sensor_ok,
         created_at,
         updated_at
-      ) VALUES (?, ?, 'unknown', NULL, '', 0, 'offline', 0, 0, 0, 0, ?, ?)`,
+      ) VALUES (?, ?, 'unknown', NULL, '', 0, 'offline', 0, 0, 0, 0, 0, ?, ?)`,
       DEFAULT_DEVICE_ID,
       DEFAULT_DEVICE_NAME,
       now,
@@ -605,8 +637,11 @@ export class SqliteDailySipStore {
             warning_threshold_percent = ?,
             oled_timeout_seconds = ?,
             ble_sync_window_seconds = ?,
+            stable_save_seconds = ?,
             history_sync_mode = ?,
             history_retention_days = ?,
+            cup_weight_tenths_g = ?,
+            cup_tolerance_tenths_g = ?,
             language = ?,
             updated_at = ?
         WHERE id = 1`,
@@ -614,8 +649,11 @@ export class SqliteDailySipStore {
       settings.warningThresholdPercent,
       settings.oledTimeoutSeconds,
       settings.bleSyncWindowSeconds,
+      settings.stableSaveSeconds,
       settings.historySyncMode,
       settings.historyRetentionDays,
+      settings.cupWeightTenthsG,
+      settings.cupToleranceTenthsG,
       settings.language,
       now
     );
@@ -643,6 +681,7 @@ export class SqliteDailySipStore {
         firmwareVersion: device.firmware_version,
         connection: device.connection_state,
         batteryPercent: device.battery_percent,
+        chargerConnected: this.latestDeviceStatus?.chargerConnected ?? false,
         lastSyncLabel: formatRelativeTime(device.last_seen_at),
         lastRecordId: lastSyncedRecordId,
         unsyncedRecords: await this.countUnsyncedRecords(db, lastSyncedRecordId),
@@ -650,6 +689,7 @@ export class SqliteDailySipStore {
         stableForSeconds: this.latestDeviceStatus?.stableForSeconds ?? null,
         calibrationActive: this.latestDeviceStatus?.calibrationActive ?? false,
         calibrationStep: this.latestDeviceStatus?.calibrationStep ?? "idle",
+        calibrationFactor: this.latestDeviceStatus?.calibrationFactor ?? device.calibration_factor ?? null,
         calibrated: Boolean(device.calibrated),
         rtcOk: Boolean(device.rtc_ok),
         storageOk: Boolean(device.sd_ok),
@@ -672,8 +712,11 @@ export class SqliteDailySipStore {
         warning_threshold_percent,
         oled_timeout_seconds,
         ble_sync_window_seconds,
+        stable_save_seconds,
         history_sync_mode,
         history_retention_days,
+        cup_weight_tenths_g,
+        cup_tolerance_tenths_g,
         language
       FROM app_settings
       WHERE id = 1`
@@ -684,8 +727,11 @@ export class SqliteDailySipStore {
       warningThresholdPercent: row?.warning_threshold_percent ?? 80,
       oledTimeoutSeconds: row?.oled_timeout_seconds ?? 15,
       bleSyncWindowSeconds: row?.ble_sync_window_seconds ?? 60,
+      stableSaveSeconds: row?.stable_save_seconds ?? 60,
       historySyncMode: normalizeHistorySyncMode(row?.history_sync_mode),
       historyRetentionDays: row?.history_retention_days ?? 10,
+      cupWeightTenthsG: row?.cup_weight_tenths_g ?? 525,
+      cupToleranceTenthsG: row?.cup_tolerance_tenths_g ?? 30,
       language: row?.language ?? "id"
     };
   }
@@ -700,6 +746,7 @@ export class SqliteDailySipStore {
         last_synced_record_id,
         battery_percent,
         connection_state,
+        calibration_factor,
         calibrated,
         rtc_ok,
         sd_ok,
@@ -736,6 +783,7 @@ export class SqliteDailySipStore {
       last_synced_record_id: "",
       battery_percent: 0,
       connection_state: "offline",
+      calibration_factor: null,
       calibrated: 0,
       rtc_ok: 0,
       sd_ok: 0,
@@ -751,7 +799,9 @@ export class SqliteDailySipStore {
   ): Promise<DailySipSnapshot["summary"]> {
     const records = await this.readRecordsForRange(db, dateKey, dateKey);
     const totals = summarizeRows(records);
-    const lastIntake = records.find((record) => record.amount_ml > 0 && !record.ignored);
+    const lastIntake = records.find(
+      (record) => record.type === "drink_auto" && record.amount_ml > 0 && !record.ignored
+    );
     const warningState = getWarningState(
       totals.totalMl,
       settings.dailyLimitMl,
@@ -1076,6 +1126,7 @@ export class SqliteDailySipStore {
               last_synced_record_id = ?,
               battery_percent = ?,
               connection_state = ?,
+              calibration_factor = ?,
               calibrated = ?,
               rtc_ok = ?,
               sd_ok = ?,
@@ -1090,6 +1141,7 @@ export class SqliteDailySipStore {
         acknowledgedRecordIdValue,
         status.batteryPercent,
         status.connection,
+        status.calibrationFactor,
         status.calibrated ? 1 : 0,
         status.rtcOk ? 1 : 0,
         status.storageOk ? 1 : 0,
@@ -1108,6 +1160,7 @@ export class SqliteDailySipStore {
             last_seen_at = ?,
             battery_percent = ?,
             connection_state = ?,
+            calibration_factor = ?,
             calibrated = ?,
             rtc_ok = ?,
             sd_ok = ?,
@@ -1121,6 +1174,7 @@ export class SqliteDailySipStore {
       now,
       status.batteryPercent,
       status.connection,
+      status.calibrationFactor,
       status.calibrated ? 1 : 0,
       status.rtcOk ? 1 : 0,
       status.storageOk ? 1 : 0,

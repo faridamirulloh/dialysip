@@ -267,7 +267,7 @@ static const uint8_t RTC_NOT_READY_ICON[] PROGMEM = {
   0x42,
   0x3C,
 };
-static const uint8_t SD_NOT_READY_ICON[] PROGMEM = {
+static const uint8_t STORAGE_NOT_READY_ICON[] PROGMEM = {
   0x1E,
   0x22,
   0x42,
@@ -329,6 +329,22 @@ static const uint8_t STABILITY_MOTION_ICON[] PROGMEM = {
   0x00, 0x00,
   0x00, 0x00,
 };
+static const uint8_t CUP_GUARD_ICON[] PROGMEM = {
+  0x00, 0x00,
+  0x1F, 0x80,
+  0x20, 0x40,
+  0x20, 0x50,
+  0x20, 0x50,
+  0x20, 0x70,
+  0x20, 0x40,
+  0x20, 0x40,
+  0x20, 0x40,
+  0x1F, 0x80,
+  0x08, 0x00,
+  0x3F, 0xC0,
+  0x00, 0x00,
+  0x00, 0x00,
+};
 void drawStabilityDebug() {
   String stabilityIndicator = "";
   if (weightUnstableActive) {
@@ -376,7 +392,9 @@ void drawStabilityProduction() {
     return;
   }
 
-  if (imuMotionActive) {
+  if (cupGuardActive) {
+    display.drawBitmap(0, 1, CUP_GUARD_ICON, STABILITY_ICON_SIZE, STABILITY_ICON_SIZE, SSD1306_WHITE);
+  } else if (imuMotionActive) {
     display.drawBitmap(0, 1, STABILITY_MOTION_ICON, STABILITY_ICON_SIZE, STABILITY_ICON_SIZE, SSD1306_WHITE);
   } else if (weightUnstableActive) {
     display.drawBitmap(0, 1, STABILITY_WEIGHT_ICON, STABILITY_ICON_SIZE, STABILITY_ICON_SIZE, SSD1306_WHITE);
@@ -423,7 +441,7 @@ void drawBleStatusIndicator() {
     drawModuleStatusIcon(nextX, RTC_NOT_READY_ICON);
   }
   if (!storageOk) {
-    drawModuleStatusIcon(nextX, SD_NOT_READY_ICON);
+    drawModuleStatusIcon(nextX, STORAGE_NOT_READY_ICON);
   }
   if (!bmiOk) {
     drawModuleStatusIcon(nextX, BMI160_NOT_READY_ICON);
@@ -468,6 +486,52 @@ bool buttonClickIndicatorActive() {
 
 bool hx711StabilizingIndicatorActive() {
   return mainDisplayVisible && !hx711Ok && !buttonClickIndicatorActive();
+}
+
+void drawBatteryIndicator() {
+  if (buttonClickIndicatorActive() || hx711StabilizingIndicatorActive()) {
+    return;
+  }
+
+  uint8_t percent = readBatteryPercent();
+  bool isChargerConnected = chargerConnected();
+  static constexpr int16_t BATTERY_INDICATOR_X = STABILITY_ICON_SIZE + 2;
+  static constexpr int16_t BATTERY_INDICATOR_Y = 1;
+  static constexpr uint8_t BATTERY_BODY_WIDTH = 9;
+  static constexpr uint8_t BATTERY_BODY_HEIGHT = 6;
+  static constexpr uint8_t BATTERY_FILL_MAX = BATTERY_BODY_WIDTH - 2;
+
+  display.drawRect(BATTERY_INDICATOR_X, BATTERY_INDICATOR_Y + 1, BATTERY_BODY_WIDTH, BATTERY_BODY_HEIGHT, SSD1306_WHITE);
+  display.drawPixel(BATTERY_INDICATOR_X + BATTERY_BODY_WIDTH, BATTERY_INDICATOR_Y + 3, SSD1306_WHITE);
+
+  uint8_t fillWidth = (uint8_t)(((uint16_t)percent * BATTERY_FILL_MAX + 99U) / 100U);
+  if (percent > 0 && fillWidth == 0) {
+    fillWidth = 1;
+  }
+  if (fillWidth > 0) {
+    display.fillRect(BATTERY_INDICATOR_X + 1, BATTERY_INDICATOR_Y + 2, fillWidth, BATTERY_BODY_HEIGHT - 2, SSD1306_WHITE);
+  }
+  if (isChargerConnected) {
+    display.fillRect(BATTERY_INDICATOR_X + 3, BATTERY_INDICATOR_Y + 2, 4, 4, SSD1306_BLACK);
+    display.drawPixel(BATTERY_INDICATOR_X + 5, BATTERY_INDICATOR_Y + 2, SSD1306_WHITE);
+    display.drawPixel(BATTERY_INDICATOR_X + 4, BATTERY_INDICATOR_Y + 3, SSD1306_WHITE);
+    display.drawPixel(BATTERY_INDICATOR_X + 5, BATTERY_INDICATOR_Y + 3, SSD1306_WHITE);
+    display.drawPixel(BATTERY_INDICATOR_X + 4, BATTERY_INDICATOR_Y + 4, SSD1306_WHITE);
+    display.drawPixel(BATTERY_INDICATOR_X + 3, BATTERY_INDICATOR_Y + 5, SSD1306_WHITE);
+  }
+
+  display.setTextSize(1);
+  display.setCursor(BATTERY_INDICATOR_X + BATTERY_BODY_WIDTH + 3, 0);
+  if (isChargerConnected) {
+    int16_t boltX = BATTERY_INDICATOR_X + BATTERY_BODY_WIDTH + 5;
+    display.fillRect(boltX + 2, 0, 2, 2, SSD1306_WHITE);
+    display.fillRect(boltX + 1, 2, 3, 2, SSD1306_WHITE);
+    display.drawFastHLine(boltX, 4, 3, SSD1306_WHITE);
+    display.fillRect(boltX, 5, 2, 2, SSD1306_WHITE);
+  } else {
+    display.print(percent);
+    display.print("%");
+  }
 }
 
 void drawButtonClickIndicator() {
@@ -531,7 +595,7 @@ void drawCountdownBar(uint32_t startedMs, uint32_t durationMs) {
 
 bool drawActiveCountdownBar() {
   if (mainDisplayVisible && sleepAfterStableReadArmed) {
-    drawCountdownBar(stableSensorReadMs, SLEEP_AFTER_STABLE_READ_MS);
+    drawCountdownBar(stableSensorReadMs, stableSaveDurationMs());
     return true;
   }
   if (deviceWarningDisplayVisible) {
@@ -662,6 +726,7 @@ void showMainDisplay() {
   display.setCursor(unitX, amountTextSize == 3 ? 36 : 40);
   display.print(unitText);
   drawStabilityIndicator();
+  drawBatteryIndicator();
   drawHx711StabilizingIndicator();
   drawActiveCountdownBar();
   display.display();
@@ -823,7 +888,10 @@ void showCalibrationStatus(const String &hint) {
     return;
   }
 
-  bool waitingForPress = hint == "Press once for tare" || hint == "Add 250g, press once";
+  bool waitingForPress =
+      hint == "Press once for tare" ||
+      hint == String("Add ") + String(CALIBRATION_KNOWN_WEIGHT_G) + "g, press once" ||
+      hint == String("Tambah ") + String(CALIBRATION_KNOWN_WEIGHT_G) + "g, tekan sekali";
 
   display.ssd1306_command(SSD1306_DISPLAYON);
   display.clearDisplay();

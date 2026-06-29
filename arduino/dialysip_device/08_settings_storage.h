@@ -18,9 +18,15 @@ void loadSettings() {
   dailyLimitMl = prefs.getUShort("limitMl", DEFAULT_DAILY_LIMIT_ML);
   drinkThresholdMl = prefs.getUShort("drinkTh", DEFAULT_DRINK_THRESHOLD_ML);
   refillThresholdMl = prefs.getUShort("refillTh", DEFAULT_REFILL_THRESHOLD_ML);
+  cupWeightTenthsG = prefs.getUShort("cupWt10", DEFAULT_CUP_WEIGHT_TENTHS_G);
+  cupToleranceTenthsG = prefs.getUShort("cupTol10", DEFAULT_CUP_TOLERANCE_TENTHS_G);
   warningPercent = prefs.getUChar("warnPct", DEFAULT_WARNING_PERCENT);
   oledTimeoutSeconds = prefs.getUShort("oledSec", DEFAULT_OLED_TIMEOUT_SECONDS);
   bleWindowSeconds = prefs.getUShort("bleSec", DEFAULT_BLE_WINDOW_SECONDS);
+  stableSaveSeconds = constrain(
+      prefs.getUShort("stableSec", DEFAULT_STABLE_SAVE_SECONDS),
+      10,
+      300);
   historyRetentionDays = prefs.getUShort("histDays", DEFAULT_HISTORY_RETENTION_DAYS);
   timezoneOffsetMinutes = prefs.getShort("tzOffset", DEFAULT_TIMEZONE_OFFSET_MINUTES);
   prefs.remove("warnActive");

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Image, Pressable, Text, View } from "react-native";
 import { BLE_RECEIVE_ICON, BLE_SEND_ICON, dialysipIcon } from "../constants/assets";
-import type { BleActivity, BleLogEntry, DailySipSnapshot } from "../data/types";
+import type { BleActivity, BleLogEntry, DailySipSnapshot, DiscoveredBottle } from "../data/types";
 import type { AppCopy } from "../i18n";
 import { localizeKnownLabel } from "../i18n";
 import { styles } from "../styles/appStyles";
@@ -13,14 +13,26 @@ import { SecondaryButton } from "../components/SecondaryButton";
 interface PairScreenProps {
   snapshot: DailySipSnapshot;
   bleLog: BleLogEntry[];
+  discoveredBottles: DiscoveredBottle[];
+  isBusy: boolean;
   copy: AppCopy;
-  onConnect: () => void;
-  onSync: () => void;
+  onScan: () => void;
+  onRegister: (scanId: string) => void;
   onClearLog: () => void;
 }
 
-export function PairScreen({ snapshot, bleLog, copy, onConnect, onSync, onClearLog }: PairScreenProps) {
+export function PairScreen({
+  snapshot,
+  bleLog,
+  discoveredBottles,
+  isBusy,
+  copy,
+  onScan,
+  onRegister,
+  onClearLog
+}: PairScreenProps) {
   const [isLogVisible, setIsLogVisible] = useState(false);
+  const [hasScanned, setHasScanned] = useState(false);
   const [directionFilter, setDirectionFilter] = useState<"all" | BleActivity>("all");
   const [channelFilter, setChannelFilter] = useState("all");
   const [logOrder, setLogOrder] = useState<"newest" | "oldest">("newest");
@@ -29,6 +41,7 @@ export function PairScreen({ snapshot, bleLog, copy, onConnect, onSync, onClearL
   const filteredLog = orderedLog
     .filter((entry) => directionFilter === "all" || entry.direction === directionFilter)
     .filter((entry) => channelFilter === "all" || entry.characteristic === channelFilter);
+  const hasRegisteredBottle = snapshot.device.deviceId !== "dialysip-local";
 
   const clearLog = () => {
     setDirectionFilter("all");
@@ -37,8 +50,13 @@ export function PairScreen({ snapshot, bleLog, copy, onConnect, onSync, onClearL
     onClearLog();
   };
 
+  const scan = () => {
+    setHasScanned(true);
+    onScan();
+  };
+
   return (
-    <ScreenCard title={copy.pairTitle} subtitle={copy.pairSubtitle} chip="BLE" chipIcon="bluetooth-outline">
+    <ScreenCard title={copy.addBottleTitle} subtitle={copy.addBottleSubtitle} chip="BLE" chipIcon="bluetooth-outline">
       <View style={styles.bottlePanel}>
         <View style={styles.bottleBadge}>
           <Image
@@ -52,9 +70,13 @@ export function PairScreen({ snapshot, bleLog, copy, onConnect, onSync, onClearL
           rows={[
             [copy.bluetoothPermission, copy.ready, copy.allowed],
             [
-              copy.nearbyBottle,
-              snapshot.device.name,
-              snapshot.device.connection === "offline" ? copy.scan : copy.found,
+              copy.registeredBottle,
+              hasRegisteredBottle ? snapshot.device.name : copy.noBottleRegistered,
+              hasRegisteredBottle
+                ? snapshot.device.connection === "connected"
+                  ? copy.connected
+                  : copy.ready
+                : copy.scan,
             ],
             [
               copy.phoneTimeSync,
@@ -65,9 +87,33 @@ export function PairScreen({ snapshot, bleLog, copy, onConnect, onSync, onClearL
         />
       </View>
       <View style={styles.actionRow}>
-        <PrimaryButton label={copy.connectBottle} icon="link-outline" onPress={onConnect} />
-        <SecondaryButton label={copy.syncTime} icon="time-outline" onPress={onSync} />
+        <PrimaryButton label={copy.scanBottles} icon="search-outline" onPress={scan} disabled={isBusy} />
       </View>
+
+      <View style={styles.bottleScanPanel}>
+        <Text style={styles.panelTitle}>{copy.availableBottles}</Text>
+        {discoveredBottles.length > 0 ? (
+          discoveredBottles.map((bottle) => (
+            <View key={bottle.scanId} style={styles.bottleScanItem}>
+              <View style={styles.settingText}>
+                <Text style={styles.infoValue}>{bottle.name}</Text>
+                <Text style={styles.bottleScanMeta}>{formatBottleScanMeta(bottle, copy)}</Text>
+              </View>
+              <SecondaryButton
+                label={copy.connect}
+                icon="link-outline"
+                onPress={() => onRegister(bottle.scanId)}
+                disabled={isBusy}
+              />
+            </View>
+          ))
+        ) : (
+          <Text style={styles.bleLogEmpty}>
+            {hasScanned && !isBusy ? copy.noBottlesFound : copy.scanBottlePrompt}
+          </Text>
+        )}
+      </View>
+
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded: isLogVisible }}
@@ -153,6 +199,13 @@ export function PairScreen({ snapshot, bleLog, copy, onConnect, onSync, onClearL
     </ScreenCard>
   );
 }
+
+const formatBottleScanMeta = (bottle: DiscoveredBottle, copy: AppCopy) => {
+  const idSuffix = bottle.scanId.slice(-8);
+  const signal = bottle.rssi === null ? "" : ` - ${copy.signal}: ${bottle.rssi} dBm`;
+  const connected = bottle.isConnected ? ` - ${copy.connected}` : "";
+  return `${copy.bleId}: ${idSuffix}${signal}${connected}`;
+};
 
 const formatBleLogTime = (timestamp: number) =>
   new Date(timestamp).toLocaleTimeString([], {

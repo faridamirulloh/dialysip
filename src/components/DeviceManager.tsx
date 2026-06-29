@@ -80,8 +80,7 @@ export function DeviceManager({ copy, device, onAdd, onRename, onRemove }: Devic
         </View>
       )}
       <View style={styles.deviceManagerActions}>
-        <SecondaryButton label={copy.addBottle} icon="add-circle-outline" onPress={onAdd} />
-        {registered && (
+        {registered ? (
           <PrimaryButton
             label={isRemoveArmed ? copy.confirmRemoveBottle : copy.removeBottle}
             icon="trash-outline"
@@ -95,6 +94,8 @@ export function DeviceManager({ copy, device, onAdd, onRename, onRemove }: Devic
               setIsRemoveArmed(true);
             }}
           />
+        ) : (
+          <SecondaryButton label={copy.addBottle} icon="add-circle-outline" onPress={onAdd} />
         )}
       </View>
     </View>

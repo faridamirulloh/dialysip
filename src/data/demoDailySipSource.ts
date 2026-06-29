@@ -5,8 +5,9 @@ import type {
   DailySipDataSource,
   DailySipSettings,
   DailySipSnapshot,
+  DiscoveredBottle,
   ManualIntakeInput,
-  WarningState
+  WarningState,
 } from "./types";
 
 const wait = async () => {
@@ -17,7 +18,7 @@ const getWarningState = (
   totalMl: number,
   limitMl: number,
   warningThresholdPercent: number,
-  batteryPercent: number
+  batteryPercent: number,
 ): WarningState => {
   if (batteryPercent <= 20) return "low_battery";
   if (totalMl > limitMl) return "over_limit";
@@ -34,7 +35,7 @@ const recalculate = (snapshot: DailySipSnapshot): DailySipSnapshot => {
     totalMl,
     snapshot.settings.dailyLimitMl,
     snapshot.settings.warningThresholdPercent,
-    snapshot.device.batteryPercent
+    snapshot.device.batteryPercent,
   );
   const currentDaily = snapshot.history.daily[0];
   const currentWeekly = snapshot.history.weekly[0];
@@ -57,7 +58,7 @@ const recalculate = (snapshot: DailySipSnapshot): DailySipSnapshot => {
     limitMl: snapshot.settings.dailyLimitMl,
     warningState,
     chartTotalsMl: [...currentDaily.chartTotalsMl.slice(0, -1), totalMl],
-    records: snapshot.records
+    records: snapshot.records,
   };
 
   const updatedWeekly = {
@@ -70,9 +71,9 @@ const recalculate = (snapshot: DailySipSnapshot): DailySipSnapshot => {
       weeklyTotalMl,
       weeklyLimitMl,
       snapshot.settings.warningThresholdPercent,
-      snapshot.device.batteryPercent
+      snapshot.device.batteryPercent,
     ),
-    chartTotalsMl: weeklyChart
+    chartTotalsMl: weeklyChart,
   };
 
   const updatedMonthly = {
@@ -85,9 +86,9 @@ const recalculate = (snapshot: DailySipSnapshot): DailySipSnapshot => {
       monthlyTotalMl,
       monthlyLimitMl,
       snapshot.settings.warningThresholdPercent,
-      snapshot.device.batteryPercent
+      snapshot.device.batteryPercent,
     ),
-    chartTotalsMl: monthlyChart
+    chartTotalsMl: monthlyChart,
   };
 
   return {
@@ -97,14 +98,14 @@ const recalculate = (snapshot: DailySipSnapshot): DailySipSnapshot => {
       totalMl,
       dailyLimitMl: snapshot.settings.dailyLimitMl,
       remainingMl,
-      warningState
+      warningState,
     },
     weekTotalsMl: weeklyChart,
     history: {
       daily: [updatedDaily, ...snapshot.history.daily.slice(1)],
       weekly: [updatedWeekly, ...snapshot.history.weekly.slice(1)],
-      monthly: [updatedMonthly, ...snapshot.history.monthly.slice(1)]
-    }
+      monthly: [updatedMonthly, ...snapshot.history.monthly.slice(1)],
+    },
   };
 };
 
@@ -134,6 +135,22 @@ export class DemoDailySipSource implements DailySipDataSource {
     return null;
   }
 
+  async scanBottles(): Promise<DiscoveredBottle[]> {
+    await wait();
+    return [
+      {
+        scanId: "demo-dialysip-001",
+        name: "DialySip-001",
+        rssi: -48,
+        isConnected: this.snapshot.device.connection === "connected",
+      },
+    ];
+  }
+
+  async registerBottle(_scanId: string) {
+    return this.connectDevice();
+  }
+
   async connectDevice() {
     await wait();
     this.snapshot = {
@@ -142,9 +159,9 @@ export class DemoDailySipSource implements DailySipDataSource {
         ...this.snapshot.device,
         connection: "connected",
         lastSyncLabel: "Just now",
-        unsyncedRecords: 0
+        unsyncedRecords: 0,
       },
-      notice: "Connected to demo bottle DialySip-001."
+      notice: "Connected to demo bottle DialySip-001.",
     };
     return this.snapshot;
   }
@@ -157,9 +174,22 @@ export class DemoDailySipSource implements DailySipDataSource {
         ...this.snapshot.device,
         lastSyncLabel: "Just now",
         unsyncedRecords: 0,
-        lastRecordId: `demo-${Date.now()}`
+        lastRecordId: `demo-${Date.now()}`,
       },
-      notice: "Demo history sync complete. No new bottle records."
+      notice: "Demo history sync complete. No new bottle records.",
+    };
+    return this.snapshot;
+  }
+
+  async syncDeviceTime() {
+    await wait();
+    this.snapshot = {
+      ...this.snapshot,
+      device: {
+        ...this.snapshot.device,
+        lastSyncLabel: "Just now",
+      },
+      notice: "Bottle time synced.",
     };
     return this.snapshot;
   }
@@ -173,9 +203,9 @@ export class DemoDailySipSource implements DailySipDataSource {
         currentWeightG: 0,
         stableForSeconds: 0,
         calibrationActive: true,
-        calibrationStep: "wait_tare"
+        calibrationStep: "wait_tare",
       },
-      notice: "Demo calibration mode started."
+      notice: "Demo calibration mode started.",
     };
     return this.snapshot;
   }
@@ -188,10 +218,14 @@ export class DemoDailySipSource implements DailySipDataSource {
       device: {
         ...this.snapshot.device,
         currentWeightG,
-        stableForSeconds: Math.min((this.snapshot.device.stableForSeconds ?? 0) + 1.2, 3.6)
-      }
+        stableForSeconds: Math.min((this.snapshot.device.stableForSeconds ?? 0) + 1.2, 3.6),
+      },
     };
     return this.snapshot;
+  }
+
+  async refreshLiveWeight() {
+    return this.refreshDeviceStatus();
   }
 
   async saveTare() {
@@ -203,9 +237,9 @@ export class DemoDailySipSource implements DailySipDataSource {
         currentWeightG: 0,
         stableForSeconds: 2.1,
         calibrationActive: true,
-        calibrationStep: "wait_weight"
+        calibrationStep: "wait_weight",
       },
-      notice: "Empty bottle tare saved in demo mode."
+      notice: "Empty bottle tare saved in demo mode.",
     };
     return this.snapshot;
   }
@@ -220,9 +254,26 @@ export class DemoDailySipSource implements DailySipDataSource {
         stableForSeconds: 2.4,
         calibrationActive: true,
         calibrationStep: "live_weight",
-        calibrated: true
+        calibrationFactor: 1000 + amountMl / 10,
+        calibrated: true,
       },
-      notice: `Calibration saved with ${amountMl} ml known amount.`
+      notice: `Calibration saved with ${amountMl} ml known amount.`,
+    };
+    return this.snapshot;
+  }
+
+  async resetCalibrationToDefault() {
+    await wait();
+    this.snapshot = {
+      ...this.snapshot,
+      device: {
+        ...this.snapshot.device,
+        calibrated: false,
+        calibrationFactor: 1000,
+        calibrationActive: false,
+        calibrationStep: "idle",
+      },
+      notice: "Calibration reset to default.",
     };
     return this.snapshot;
   }
@@ -234,11 +285,18 @@ export class DemoDailySipSource implements DailySipDataSource {
       device: {
         ...this.snapshot.device,
         calibrationActive: false,
-        calibrationStep: "idle"
+        calibrationStep: "idle",
       },
-      notice: "Demo calibration mode finished."
+      notice: "Demo calibration mode finished.",
     };
     return this.snapshot;
+  }
+
+  async saveCupCalibration(cupWeightTenthsG: number) {
+    return this.updateSettings({
+      ...this.snapshot.settings,
+      cupWeightTenthsG,
+    });
   }
 
   async addManualIntake(input: ManualIntakeInput) {
@@ -251,7 +309,7 @@ export class DemoDailySipSource implements DailySipDataSource {
       dateKey: input.dateKey,
       timeLabel: input.timeKey ?? "Now",
       title: input.category,
-      detail: input.note?.trim() ? input.note.trim() : "Manual app entry"
+      detail: input.note?.trim() ? input.note.trim() : "Manual app entry",
     };
 
     this.snapshot = recalculate({
@@ -259,11 +317,11 @@ export class DemoDailySipSource implements DailySipDataSource {
       summary: {
         ...this.snapshot.summary,
         manualMl: this.snapshot.summary.manualMl + input.amountMl,
-        lastDrinkAmountMl: input.amountMl,
-        lastDrinkTimeLabel: "Now"
       },
       records: [newRecord, ...this.snapshot.records],
-      notice: input.dateKey ? `${input.category} added to ${input.dateKey}.` : `${input.category} added to today's total.`
+      notice: input.dateKey
+        ? `${input.category} added to ${input.dateKey}.`
+        : `${input.category} added to today's total.`,
     });
     return this.snapshot;
   }
@@ -272,7 +330,7 @@ export class DemoDailySipSource implements DailySipDataSource {
     await wait();
     this.snapshot = {
       ...this.snapshot,
-      notice: `Riwayat tanggal ${dateKey} dihapus.`
+      notice: `Riwayat tanggal ${dateKey} dihapus.`,
     };
     return this.snapshot;
   }
@@ -284,7 +342,7 @@ export class DemoDailySipSource implements DailySipDataSource {
       notice:
         startDateKey === endDateKey
           ? `Riwayat tanggal ${startDateKey} dihapus.`
-          : `Riwayat ${startDateKey} sampai ${endDateKey} dihapus.`
+          : `Riwayat ${startDateKey} sampai ${endDateKey} dihapus.`,
     };
     return this.snapshot;
   }
@@ -294,7 +352,7 @@ export class DemoDailySipSource implements DailySipDataSource {
     this.snapshot = recalculate({
       ...this.snapshot,
       records: [],
-      notice: "Semua riwayat dihapus."
+      notice: "Semua riwayat dihapus.",
     });
     return this.snapshot;
   }
@@ -303,16 +361,16 @@ export class DemoDailySipSource implements DailySipDataSource {
     await wait();
     const displayName = name.trim();
     if (!displayName) {
-      throw new Error("Bottle name cannot be empty.");
+      throw new Error("Nama botol tidak boleh kosong.");
     }
 
     this.snapshot = {
       ...this.snapshot,
       device: {
         ...this.snapshot.device,
-        name: displayName
+        name: displayName,
       },
-      notice: "Nama botol diperbarui."
+      notice: "Nama botol diperbarui.",
     };
     return this.snapshot;
   }
@@ -328,6 +386,7 @@ export class DemoDailySipSource implements DailySipDataSource {
         firmwareVersion: "unknown",
         connection: "offline",
         batteryPercent: 0,
+        chargerConnected: false,
         lastSyncLabel: "Never",
         lastRecordId: "",
         unsyncedRecords: 0,
@@ -335,13 +394,14 @@ export class DemoDailySipSource implements DailySipDataSource {
         stableForSeconds: null,
         calibrationActive: false,
         calibrationStep: "idle",
+        calibrationFactor: null,
         calibrated: false,
         rtcOk: false,
         storageOk: false,
         sdOk: false,
-        sensorOk: false
+        sensorOk: false,
       },
-      notice: "Botol dihapus dari aplikasi."
+      notice: "Botol dihapus dari aplikasi.",
     };
     return this.snapshot;
   }
@@ -351,7 +411,7 @@ export class DemoDailySipSource implements DailySipDataSource {
     this.snapshot = recalculate({
       ...this.snapshot,
       settings,
-      notice: "Settings saved to demo local data."
+      notice: "Pengaturan tersimpan ke data lokal demo.",
     });
     return this.snapshot;
   }

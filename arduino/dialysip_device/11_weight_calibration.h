@@ -46,6 +46,30 @@ void updateCalibrationLiveWeight(bool notify) {
   }
 }
 
+void refreshScaleWeight() {
+  if (!hx711Ok) {
+    hasCurrentWeight = false;
+    scaleStable = false;
+    weightUnstableActive = true;
+    updateStatusCharacteristic(true);
+    return;
+  }
+
+  float nextWeightG = 0.0f;
+  if (hx711.readWeightG(nextWeightG)) {
+    noteCurrentWeight(nextWeightG);
+    updateCupGuardForCurrentWeight();
+  } else {
+    scaleStable = false;
+    weightUnstableActive = true;
+  }
+
+  if (mainDisplayVisible) {
+    showMainDisplay();
+  }
+  updateStatusCharacteristic(true);
+}
+
 bool updateImuDebugFromAccel() {
   if (!bmiOk) {
     return false;
@@ -116,12 +140,19 @@ void updateMainDisplayLive() {
     }
   }
 
+  bool previousCupGuardActive = cupGuardActive;
+  updateCupGuardForCurrentWeight();
+  if (previousCupGuardActive != cupGuardActive) {
+    changed = true;
+  }
+
   if (deviceWarningCode == "bottle_removed") {
-    if (hasCurrentWeight && currentWeightG > BOTTLE_REMOVED_THRESHOLD_G) {
+    if (hasCurrentWeight && currentWeightG > bottleRemovedThresholdG()) {
       bottleRemovedStableCycles = 0;
       clearDeviceWarning("bottle_removed");
       showMainDisplay();
     } else {
+      cupGuardActive = false;
       disarmSleepAfterStableRead();
       stableWeightFinalized = false;
       showBottleRemovedDisplay();
@@ -129,7 +160,7 @@ void updateMainDisplayLive() {
     return;
   }
 
-  if (hasCurrentWeight && currentWeightG > BOTTLE_REMOVED_THRESHOLD_G) {
+  if (hasCurrentWeight && currentWeightG > bottleRemovedThresholdG()) {
     bottleRemovedStableCycles = 0;
   }
 
@@ -169,7 +200,7 @@ void exitCalibrationMode() {
   calibrationMode = false;
   calibrationTareSaved = false;
   calibrationStep = CALIBRATION_IDLE;
-  showStatus("Kalibrasi selesai", "", "");
+  showMainDisplay();
   updateStatusCharacteristic(true);
 }
 
@@ -202,12 +233,13 @@ void tareScale() {
   scaleStableSinceMs = millis() > LIVE_WEIGHT_STABLE_MS ? millis() - LIVE_WEIGHT_STABLE_MS : 0;
   scaleStable = true;
   weightUnstableActive = false;
+  cupGuardActive = false;
   saveWeightState();
   noteEvent("tare", 0);
   if (calibrationMode) {
     calibrationTareSaved = true;
     calibrationStep = CALIBRATION_WAIT_WEIGHT;
-    showCalibrationStatus("Tambah 250g, tekan sekali");
+    showCalibrationStatus(String("Tambah ") + String(CALIBRATION_KNOWN_WEIGHT_G) + "g, tekan sekali");
   } else {
     showStatus("Tare disimpan", "Kalibrasi 0 g", "");
   }
@@ -254,6 +286,7 @@ void calibrateScale(uint16_t knownMl) {
   scaleStableSinceMs = millis() > LIVE_WEIGHT_STABLE_MS ? millis() - LIVE_WEIGHT_STABLE_MS : 0;
   scaleStable = true;
   weightUnstableActive = false;
+  cupGuardActive = false;
   noteEvent("calibration", knownMl);
   if (calibrationMode) {
     calibrationStep = CALIBRATION_LIVE_WEIGHT;
@@ -261,6 +294,17 @@ void calibrateScale(uint16_t knownMl) {
   } else {
     showStatus("Kalibrasi disimpan", String("Factor ") + String(calibrationFactor, 2), "");
   }
+  updateStatusCharacteristic(true);
+}
+
+void resetCalibrationToDefault() {
+  calibrationFactor = DEFAULT_CALIBRATION_FACTOR;
+  prefs.putFloat("calFactor", calibrationFactor);
+  calibrationMode = false;
+  calibrationTareSaved = false;
+  calibrationStep = CALIBRATION_IDLE;
+  noteEvent("calibration", 0);
+  showStatus("Kalibrasi default", "Load cell", "");
   updateStatusCharacteristic(true);
 }
 
@@ -338,7 +382,10 @@ void processWeightWake(const String &reason) {
   scaleStable = true;
   weightUnstableActive = false;
 
-  if (currentWeightG <= BOTTLE_REMOVED_THRESHOLD_G) {
+  updateCupGuardForCurrentWeight();
+
+  if (currentWeightG <= bottleRemovedThresholdG()) {
+    cupGuardActive = false;
     bottleRemovedStableCycles = BOTTLE_REMOVED_STABLE_COUNT_LIMIT;
     setDeviceWarning("bottle_removed", "Pasang botol", 55);
     noteEvent("suspicious_change", 0);
@@ -377,11 +424,15 @@ bool finalizeStableWeightBeforeSleep() {
 
   currentWeightG = finalWeightG;
   hasCurrentWeight = true;
-  scaleStableSinceMs = millis() > SLEEP_AFTER_STABLE_READ_MS ? millis() - SLEEP_AFTER_STABLE_READ_MS : 0;
+  uint32_t stableSaveMs = stableSaveDurationMs();
+  scaleStableSinceMs = millis() > stableSaveMs ? millis() - stableSaveMs : 0;
   scaleStable = true;
   weightUnstableActive = false;
 
-  if (currentWeightG <= BOTTLE_REMOVED_THRESHOLD_G) {
+  updateCupGuardForCurrentWeight();
+
+  if (currentWeightG <= bottleRemovedThresholdG()) {
+    cupGuardActive = false;
     if (bottleRemovedStableCycles < 255) {
       bottleRemovedStableCycles++;
     }
@@ -406,6 +457,13 @@ bool finalizeStableWeightBeforeSleep() {
 
   float beforeG = lastStableWeightG;
   float deltaG = currentWeightG - beforeG;
+
+  if (cupGuardDropMatches(deltaG)) {
+    cupGuardActive = true;
+    showMainDisplay();
+    return false;
+  }
+
   uint16_t amountMl = 0;
   String type = "";
   String confidence = "normal";

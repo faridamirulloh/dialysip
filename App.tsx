@@ -39,17 +39,22 @@ export default function App() {
     snapshot,
     bleActivity,
     bleLog,
+    discoveredBottles,
     clearBleLog,
     isBusy,
     error,
     refreshSnapshot,
-    connectDevice,
+    scanBottles,
+    registerBottle,
     syncNow,
+    syncDeviceTime,
     startCalibration,
-    refreshDeviceStatus,
+    refreshLiveWeight,
     saveTare,
     confirmCalibrationAmount,
+    resetCalibrationToDefault,
     finishCalibration,
+    saveCupCalibration,
     addManualIntake,
     deleteHistoryRange,
     deleteAllHistory,
@@ -65,7 +70,9 @@ export default function App() {
   const pageOpacity = useRef(new Animated.Value(1)).current;
   const loadingPulse = useRef(new Animated.Value(0)).current;
   const bootCopy = getAppCopy();
-  const noticeText = snapshot ? localizeNotice(error ?? snapshot.notice ?? "", snapshot.settings.language) : "";
+  const noticeLanguage = snapshot?.settings.language;
+  const noticeCopy = getAppCopy(noticeLanguage);
+  const noticeText = localizeNotice(error ?? snapshot?.notice ?? "", noticeLanguage ?? "id");
   const noticeTone = snapshot ? (error ? "danger" : snapshot.mode === "demo" ? "normal" : "warn") : "normal";
 
   const loadingDropScale = loadingPulse.interpolate({
@@ -230,7 +237,7 @@ export default function App() {
               tone={noticeTone}
               text={noticeText}
               autoHideMs={noticeAutoHideMs}
-              closeLabel={copy.closeNotice}
+              closeLabel={noticeCopy.closeNotice}
               onClose={() => setDismissedNoticeText(noticeText)}
             />
           )}
@@ -253,9 +260,11 @@ export default function App() {
                 <PairScreen
                   snapshot={snapshot}
                   bleLog={bleLog}
+                  discoveredBottles={discoveredBottles}
+                  isBusy={isBusy}
                   copy={copy}
-                  onConnect={connectDevice}
-                  onSync={syncNow}
+                  onScan={scanBottles}
+                  onRegister={registerBottle}
                   onClearLog={clearBleLog}
                 />
               )}
@@ -265,10 +274,12 @@ export default function App() {
                   copy={copy}
                   isBusy={isBusy}
                   onStartCalibration={startCalibration}
-                  onRefreshStatus={refreshDeviceStatus}
+                  onFinishCalibration={finishCalibration}
+                  onRefreshLiveWeight={refreshLiveWeight}
                   onSaveTare={saveTare}
                   onConfirmAmount={confirmCalibrationAmount}
-                  onFinishCalibration={finishCalibration}
+                  onResetCalibrationDefault={resetCalibrationToDefault}
+                  onSaveCupCalibration={saveCupCalibration}
                 />
               )}
               {screen === "dashboard" && (
@@ -295,6 +306,7 @@ export default function App() {
                   snapshot={snapshot}
                   copy={copy}
                   onSave={updateSettings}
+                  onSyncTime={syncDeviceTime}
                   onCalibration={() => setScreen("calibration")}
                   onPair={() => setScreen("pair")}
                   onRenameDevice={renameDevice}

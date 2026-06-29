@@ -8,6 +8,42 @@ void setOptionalPower(int8_t pin, bool enabled) {
   digitalWrite(pin, enabled ? HIGH : LOW);
 }
 
+void initBatteryAdc() {
+  pinMode(PIN_BATTERY_ADC, INPUT);
+  pinMode(PIN_CHARGER_DETECT, INPUT);
+  analogSetPinAttenuation(PIN_BATTERY_ADC, ADC_11db);
+}
+
+uint16_t readTrimmedAdcPinMv(uint8_t pin, uint8_t samples) {
+  if (samples == 0) {
+    return 0;
+  }
+
+  uint32_t sumMv = 0;
+  uint32_t minMv = 65535UL;
+  uint32_t maxMv = 0;
+  for (uint8_t i = 0; i < samples; i++) {
+    uint32_t sampleMv = analogReadMilliVolts(pin);
+    sumMv += sampleMv;
+    if (sampleMv < minMv) {
+      minMv = sampleMv;
+    }
+    if (sampleMv > maxMv) {
+      maxMv = sampleMv;
+    }
+  }
+
+  uint8_t divisor = samples;
+  if (samples > 2) {
+    sumMv -= minMv;
+    sumMv -= maxMv;
+    divisor -= 2;
+  }
+
+  uint32_t averagedMv = (sumMv + (divisor / 2)) / divisor;
+  return averagedMv > 65535UL ? 65535U : (uint16_t)averagedMv;
+}
+
 String makeDeviceId() {
   uint64_t mac = ESP.getEfuseMac();
   char buf[24];
@@ -95,6 +131,53 @@ void resetDailyTotalIfNeeded() {
   }
 }
 
+float cupWeightG() {
+  return (float)cupWeightTenthsG / 10.0f;
+}
+
+float cupToleranceG() {
+  return (float)cupToleranceTenthsG / 10.0f;
+}
+
+uint32_t stableSaveDurationMs() {
+  return (uint32_t)stableSaveSeconds * 1000UL;
+}
+
+float bottleRemovedThresholdG() {
+  float weightG = cupWeightG();
+  if (weightG > 15.0f) {
+    return -(weightG - 5.0f);
+  }
+
+  return BOTTLE_REMOVED_THRESHOLD_G;
+}
+
+bool cupGuardDropMatches(float deltaG) {
+  if (deltaG >= 0.0f) {
+    return false;
+  }
+
+  return abs((-deltaG) - cupWeightG()) <= cupToleranceG();
+}
+
+void updateCupGuardForDelta(float deltaG) {
+  if (!cupGuardActive) {
+    return;
+  }
+
+  if (deltaG >= 0.0f || abs(deltaG) <= cupToleranceG() || !cupGuardDropMatches(deltaG)) {
+    cupGuardActive = false;
+  }
+}
+
+void updateCupGuardForCurrentWeight() {
+  if (!hasLastStableWeight || !hasCurrentWeight) {
+    return;
+  }
+
+  updateCupGuardForDelta(currentWeightG - lastStableWeightG);
+}
+
 void clearAllDeviceWarnings() {
   deviceWarningActive = false;
   deviceWarningCode = "";
@@ -132,6 +215,7 @@ void resetSavedDataExceptCalibrationAndSettings() {
   weightUnstableActive = false;
   imuMotionActive = false;
   hasImuDebug = false;
+  cupGuardActive = false;
   unstableWeightFailures = 0;
   bottleRemovedStableCycles = 0;
   lastEventType = "data_reset";
@@ -154,10 +238,57 @@ void resetSavedDataExceptCalibrationAndSettings() {
 }
 
 uint16_t readBatteryMv() {
-  if (PIN_BATTERY_ADC < 0) {
+  static bool filterInitialized = false;
+  static uint32_t filteredMv = 0;
+
+  uint32_t adcMv = readTrimmedAdcPinMv(PIN_BATTERY_ADC, BATTERY_ADC_SAMPLES);
+  uint32_t rawBatteryMv = adcMv * BATTERY_DIVIDER_RATIO;
+  if (!filterInitialized) {
+    filteredMv = rawBatteryMv;
+    filterInitialized = true;
+  } else {
+    filteredMv = ((filteredMv * (BATTERY_FILTER_DENOMINATOR - BATTERY_FILTER_NUMERATOR)) +
+                  (rawBatteryMv * BATTERY_FILTER_NUMERATOR) +
+                  (BATTERY_FILTER_DENOMINATOR / 2)) /
+                 BATTERY_FILTER_DENOMINATOR;
+  }
+
+  return filteredMv > 65535UL ? 65535U : (uint16_t)filteredMv;
+}
+
+uint8_t batteryPercentFromMv(uint16_t batteryMv) {
+  if (batteryMv <= BATTERY_EMPTY_MV) {
     return 0;
   }
-  return 0;
+  if (batteryMv >= BATTERY_FULL_MV) {
+    return 100;
+  }
+
+  uint16_t span = BATTERY_FULL_MV - BATTERY_EMPTY_MV;
+  return (uint8_t)(((uint32_t)(batteryMv - BATTERY_EMPTY_MV) * 100UL + (span / 2)) / span);
+}
+
+uint8_t readBatteryPercentForMv(uint16_t batteryMv) {
+  static bool percentInitialized = false;
+  static uint16_t lastPercentMv = 0;
+  static uint8_t lastPercent = 0;
+  uint16_t deltaMv = batteryMv >= lastPercentMv ? batteryMv - lastPercentMv : lastPercentMv - batteryMv;
+
+  if (!percentInitialized || deltaMv >= BATTERY_PERCENT_UPDATE_MV) {
+    lastPercent = batteryPercentFromMv(batteryMv);
+    lastPercentMv = batteryMv;
+    percentInitialized = true;
+  }
+
+  return lastPercent;
+}
+
+uint8_t readBatteryPercent() {
+  return readBatteryPercentForMv(readBatteryMv());
+}
+
+bool chargerConnected() {
+  return digitalRead(PIN_CHARGER_DETECT) == HIGH;
 }
 
 String jsonEscape(const String &input) {

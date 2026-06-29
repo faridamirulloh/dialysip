@@ -6,11 +6,13 @@ export interface SyncedDeviceStatus {
   firmwareVersion: string;
   connection: ConnectionState;
   batteryPercent: number;
+  chargerConnected: boolean;
   lastRecordId: string;
   currentWeightG: number | null;
   stableForSeconds: number | null;
   calibrationActive: boolean;
   calibrationStep: CalibrationStep;
+  calibrationFactor: number | null;
   calibrated: boolean;
   rtcOk: boolean;
   storageOk: boolean;

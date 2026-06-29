@@ -12,6 +12,13 @@ export interface BleLogEntry {
   timestamp: number;
 }
 
+export interface DiscoveredBottle {
+  scanId: string;
+  name: string;
+  rssi: number | null;
+  isConnected: boolean;
+}
+
 export type CalibrationStep = "idle" | "wait_tare" | "wait_weight" | "live_weight";
 
 export type RecordType =
@@ -41,8 +48,11 @@ export interface DailySipSettings {
   warningThresholdPercent: number;
   oledTimeoutSeconds: number;
   bleSyncWindowSeconds: number;
+  stableSaveSeconds: number;
   historySyncMode: HistorySyncMode;
   historyRetentionDays: number;
+  cupWeightTenthsG: number;
+  cupToleranceTenthsG: number;
   language: LanguageCode;
 }
 
@@ -52,6 +62,7 @@ export interface DeviceStatus {
   firmwareVersion: string;
   connection: ConnectionState;
   batteryPercent: number;
+  chargerConnected: boolean;
   lastSyncLabel: string;
   lastRecordId: string;
   unsyncedRecords: number;
@@ -59,6 +70,7 @@ export interface DeviceStatus {
   stableForSeconds: number | null;
   calibrationActive: boolean;
   calibrationStep: CalibrationStep;
+  calibrationFactor: number | null;
   calibrated: boolean;
   rtcOk: boolean;
   storageOk: boolean;
@@ -141,13 +153,19 @@ export interface DailySipDataSource {
   subscribeToBleLog(onEntry: (entry: BleLogEntry) => void): () => void;
   setAppActive(isActive: boolean): void;
   autoConnectActiveDevice(): Promise<DailySipSnapshot | null>;
+  scanBottles(): Promise<DiscoveredBottle[]>;
+  registerBottle(scanId: string): Promise<DailySipSnapshot>;
   connectDevice(): Promise<DailySipSnapshot>;
   syncNow(): Promise<DailySipSnapshot>;
+  syncDeviceTime(): Promise<DailySipSnapshot>;
   startCalibration(): Promise<DailySipSnapshot>;
   refreshDeviceStatus(): Promise<DailySipSnapshot>;
+  refreshLiveWeight(): Promise<DailySipSnapshot>;
   saveTare(): Promise<DailySipSnapshot>;
   confirmCalibrationAmount(amountMl: number): Promise<DailySipSnapshot>;
+  resetCalibrationToDefault(): Promise<DailySipSnapshot>;
   finishCalibration(): Promise<DailySipSnapshot>;
+  saveCupCalibration(cupWeightTenthsG: number): Promise<DailySipSnapshot>;
   addManualIntake(input: ManualIntakeInput): Promise<DailySipSnapshot>;
   deleteHistoryForDate(dateKey: string): Promise<DailySipSnapshot>;
   deleteHistoryRange(startDateKey: string, endDateKey: string): Promise<DailySipSnapshot>;

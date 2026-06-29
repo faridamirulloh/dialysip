@@ -2,7 +2,7 @@
 
 String buildSettingsJson() {
   String json;
-  json.reserve(260);
+  json.reserve(360);
   json += "{\"protocol_version\":";
   json += BLE_PROTOCOL_VERSION;
   json += ",\"daily_limit_ml\":";
@@ -13,6 +13,8 @@ String buildSettingsJson() {
   json += oledTimeoutSeconds;
   json += ",\"ble_advertise_seconds\":";
   json += bleWindowSeconds;
+  json += ",\"stable_save_seconds\":";
+  json += stableSaveSeconds;
   json += ",\"history_retention_days\":";
   json += historyRetentionDays;
   json += ",\"timezone_offset_minutes\":";
@@ -21,6 +23,10 @@ String buildSettingsJson() {
   json += drinkThresholdMl;
   json += ",\"refill_threshold_ml\":";
   json += refillThresholdMl;
+  json += ",\"cup_weight_tenths_g\":";
+  json += cupWeightTenthsG;
+  json += ",\"cup_tolerance_tenths_g\":";
+  json += cupToleranceTenthsG;
   json += "}";
   return json;
 }
@@ -41,7 +47,10 @@ const char *calibrationStepName() {
 
 String buildStatusJson() {
   String json;
-  json.reserve(400);
+  json.reserve(560);
+  uint16_t batteryMv = readBatteryMv();
+  uint8_t batteryPercent = readBatteryPercentForMv(batteryMv);
+  bool isChargerConnected = chargerConnected();
   json += "{\"protocol_version\":";
   json += BLE_PROTOCOL_VERSION;
   json += ",\"device_id\":\"";
@@ -50,7 +59,13 @@ String buildStatusJson() {
   json += DEVICE_NAME;
   json += "\",\"firmware_version\":\"";
   json += FIRMWARE_VERSION;
-  json += "\",\"current_weight_g\":";
+  json += "\",\"battery_mv\":";
+  json += batteryMv;
+  json += ",\"battery_percent\":";
+  json += batteryPercent;
+  json += ",\"charger_connected\":";
+  json += isChargerConnected ? "true" : "false";
+  json += ",\"current_weight_g\":";
   if (hasCurrentWeight) {
     json += String(currentWeightG, 1);
   } else {
@@ -74,6 +89,8 @@ String buildStatusJson() {
   json += storageOk ? "true" : "false";
   json += ",\"sensor_ok\":";
   json += (bmiOk && hx711Ok) ? "true" : "false";
+  json += ",\"calibration_factor\":";
+  json += String(calibrationFactor, 2);
   json += ",\"calibrated\":";
   json += (abs(calibrationFactor - DEFAULT_CALIBRATION_FACTOR) > 0.01f) ? "true" : "false";
   json += "}";
@@ -198,6 +215,10 @@ void serviceAppHeartbeatTimeout() {
 bool handleLegacyCommand(const String &command) {
   if (command == "tare") {
     tareScale();
+  } else if (command == "refresh_weight") {
+    refreshScaleWeight();
+  } else if (command == "reset_calibration_default") {
+    resetCalibrationToDefault();
   } else if (command.startsWith("calibrate:")) {
     uint16_t knownMl = (uint16_t)command.substring(10).toInt();
     calibrateScale(knownMl);
@@ -230,6 +251,17 @@ bool handleJsonCommand(const String &payload) {
     return false;
   } else if (command == "tare") {
     tareScale();
+  } else if (command == "refresh_weight") {
+    refreshScaleWeight();
+  } else if (command == "calibrate_known_weight") {
+    uint32_t knownMl = 0;
+    if (readJsonUInt(payload, "known_amount_ml", knownMl) && knownMl > 0 && knownMl <= 5000) {
+      calibrateScale((uint16_t)knownMl);
+    } else {
+      noteEvent("device_error", 0);
+    }
+  } else if (command == "reset_calibration_default") {
+    resetCalibrationToDefault();
   } else if (command == "finish_calibration") {
     uint32_t knownMl = 0;
     if (readJsonUInt(payload, "known_amount_ml", knownMl)) {
@@ -328,6 +360,9 @@ bool applySetting(const String &key, int value) {
   } else if (key == "ble" || key == "ble_window_seconds" || key == "ble_advertise_seconds") {
     bleWindowSeconds = constrain(value, 15, 600);
     prefs.putUShort("bleSec", bleWindowSeconds);
+  } else if (key == "stable_save" || key == "stable_save_seconds") {
+    stableSaveSeconds = constrain(value, 10, 300);
+    prefs.putUShort("stableSec", stableSaveSeconds);
   } else if (key == "history_days" || key == "history_retention_days") {
     historyRetentionDays = constrain(value, 1, 365);
     prefs.putUShort("histDays", historyRetentionDays);
@@ -337,6 +372,12 @@ bool applySetting(const String &key, int value) {
   } else if (key == "refill_threshold" || key == "refill_threshold_ml") {
     refillThresholdMl = constrain(value, 1, 1000);
     prefs.putUShort("refillTh", refillThresholdMl);
+  } else if (key == "cup_weight_tenths_g") {
+    cupWeightTenthsG = constrain(value, 10, 5000);
+    prefs.putUShort("cupWt10", cupWeightTenthsG);
+  } else if (key == "cup_tolerance_tenths_g") {
+    cupToleranceTenthsG = constrain(value, 1, 500);
+    prefs.putUShort("cupTol10", cupToleranceTenthsG);
   } else {
     return false;
   }
@@ -366,6 +407,9 @@ bool handleJsonSettingsWrite(const String &payload) {
   if (readJsonUInt(payload, "ble_window_seconds", value)) {
     changed = applySetting("ble_window_seconds", (int)value) || changed;
   }
+  if (readJsonUInt(payload, "stable_save_seconds", value)) {
+    changed = applySetting("stable_save_seconds", (int)value) || changed;
+  }
   if (readJsonUInt(payload, "history_retention_days", value)) {
     changed = applySetting("history_retention_days", (int)value) || changed;
   }
@@ -377,6 +421,12 @@ bool handleJsonSettingsWrite(const String &payload) {
   }
   if (readJsonUInt(payload, "refill_threshold_ml", value)) {
     changed = applySetting("refill_threshold_ml", (int)value) || changed;
+  }
+  if (readJsonUInt(payload, "cup_weight_tenths_g", value)) {
+    changed = applySetting("cup_weight_tenths_g", (int)value) || changed;
+  }
+  if (readJsonUInt(payload, "cup_tolerance_tenths_g", value)) {
+    changed = applySetting("cup_tolerance_tenths_g", (int)value) || changed;
   }
 
   return changed;

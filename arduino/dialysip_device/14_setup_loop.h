@@ -14,6 +14,8 @@ void setup() {
   deviceId = makeDeviceId();
   loadSettings();
 
+  initBatteryAdc();
+
   setOptionalPower(PIN_OLED_POWER, true);
   setOptionalPower(PIN_HX711_POWER, true);
 
@@ -114,7 +116,7 @@ void loop() {
     if (calibrationStep == CALIBRATION_WAIT_TARE) {
       showCalibrationStatus("Press once for tare");
     } else if (calibrationStep == CALIBRATION_WAIT_WEIGHT) {
-      showCalibrationStatus("Add 250g, press once");
+      showCalibrationStatus(String("Add ") + String(CALIBRATION_KNOWN_WEIGHT_G) + "g, press once");
     } else {
       updateCalibrationLiveWeight(bleConnected);
       showCalibrationStatus("Hold 2s to exit");

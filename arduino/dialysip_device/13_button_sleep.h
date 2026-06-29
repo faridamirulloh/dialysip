@@ -15,7 +15,7 @@ void disarmSleepAfterStableRead() {
 bool stableReadFinalizationReady() {
   return sleepAfterStableReadArmed &&
          (mainDisplayVisible || bleSyncMode) &&
-         (uint32_t)(millis() - stableSensorReadMs) >= SLEEP_AFTER_STABLE_READ_MS;
+         (uint32_t)(millis() - stableSensorReadMs) >= stableSaveDurationMs();
 }
 
 bool stableReadSleepReady() {

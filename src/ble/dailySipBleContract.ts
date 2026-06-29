@@ -23,9 +23,12 @@ export interface DailySipBleStatusPayload {
   stable_for_ms?: number;
   calibration_active?: boolean;
   calibration_step?: string;
+  calibration_factor?: number;
   today_total_ml?: number;
   battery_mv?: number;
   battery_percent?: number;
+  charger_adc_mv?: number;
+  charger_connected?: boolean;
   storage_ok?: boolean;
   sd_ok?: boolean;
   rtc_ok?: boolean;
@@ -61,6 +64,9 @@ export type DailySipBleCommand =
   | "tare"
   | "start_calibration"
   | "finish_calibration"
+  | "refresh_weight"
+  | "calibrate_known_weight"
+  | "reset_calibration_default"
   | "request_sync"
   | "heartbeat"
   | "clear_error"
@@ -75,6 +81,7 @@ export const toSyncedDeviceStatus = (
   firmwareVersion: payload.firmware_version ?? "unknown",
   connection: "connected",
   batteryPercent: payload.battery_percent ?? 0,
+  chargerConnected: Boolean(payload.charger_connected),
   lastRecordId: normalizeRecordId(payload.last_record_id),
   lastSyncId: normalizeRecordId(payload.last_sync_id ?? payload.last_acked_record_id),
   currentWeightG: payload.current_weight_g ?? null,
@@ -88,6 +95,7 @@ export const toSyncedDeviceStatus = (
     Boolean(payload.calibration_active),
     Boolean(payload.calibrated)
   ),
+  calibrationFactor: typeof payload.calibration_factor === "number" ? payload.calibration_factor : null,
   calibrated: Boolean(payload.calibrated),
   rtcOk: Boolean(payload.rtc_ok),
   storageOk: Boolean(payload.storage_ok ?? payload.sd_ok),
@@ -101,7 +109,10 @@ export const toDeviceSettingsPayload = (settings: PendingDeviceSettings) => ({
   over_limit_threshold_percent: settings.overLimitThresholdPercent,
   oled_timeout_seconds: settings.oledTimeoutSeconds,
   ble_advertise_seconds: settings.bleSyncWindowSeconds,
+  stable_save_seconds: settings.stableSaveSeconds,
   history_retention_days: settings.historyRetentionDays,
+  cup_weight_tenths_g: settings.cupWeightTenthsG,
+  cup_tolerance_tenths_g: settings.cupToleranceTenthsG,
   drink_threshold_ml: 10,
   refill_threshold_ml: 50
 });

@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { createDailySipDataSource } from "./createDailySipDataSource";
-import type { BleActivity, BleLogEntry, DailySipSettings, DailySipSnapshot, ManualIntakeInput } from "./types";
+import type {
+  BleActivity,
+  BleLogEntry,
+  DailySipSettings,
+  DailySipSnapshot,
+  DiscoveredBottle,
+  ManualIntakeInput
+} from "./types";
 
 const BLE_ACTIVITY_VISIBLE_MS = 2000;
 const MAX_BLE_LOG_ENTRIES = 100;
@@ -13,6 +20,7 @@ export const useDailySipData = () => {
   const [snapshot, setSnapshot] = useState<DailySipSnapshot | null>(null);
   const [bleActivity, setBleActivity] = useState<BleActivity | null>(null);
   const [bleLog, setBleLog] = useState<BleLogEntry[]>([]);
+  const [discoveredBottles, setDiscoveredBottles] = useState<DiscoveredBottle[]>([]);
   const [isAppActive, setIsAppActive] = useState(AppState.currentState === "active");
   const [isBusy, setIsBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -29,9 +37,11 @@ export const useDailySipData = () => {
       try {
         const nextSnapshot = await operation();
         setSnapshot(nextSnapshot);
+        return nextSnapshot;
       } catch (caught) {
-        const message = caught instanceof Error ? caught.message : "DialySip action failed.";
+        const message = caught instanceof Error ? caught.message : "Tindakan DialySip gagal.";
         setError(message);
+        return null;
       } finally {
         if (showBusy) {
           setIsBusy(false);
@@ -97,6 +107,20 @@ export const useDailySipData = () => {
     setBleLog([]);
   }, []);
 
+  const scanBottles = useCallback(async () => {
+    setIsBusy(true);
+    setError(null);
+    try {
+      const bottles = await sourceRef.current.scanBottles();
+      setDiscoveredBottles(bottles);
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Pemindaian botol DialySip gagal.";
+      setError(message);
+    } finally {
+      setIsBusy(false);
+    }
+  }, []);
+
   useEffect(() => {
     const unsubscribe = sourceRef.current.subscribeToBleActivity((activity) => {
       if (bleActivityTimeoutRef.current) {
@@ -135,18 +159,31 @@ export const useDailySipData = () => {
     snapshot,
     bleActivity,
     bleLog,
+    discoveredBottles,
     clearBleLog,
     isBusy,
     error,
     refreshSnapshot: () => run(() => sourceRef.current.loadSnapshot()),
+    scanBottles,
+    registerBottle: (scanId: string) =>
+      run(async () => {
+        const nextSnapshot = await sourceRef.current.registerBottle(scanId);
+        setDiscoveredBottles([]);
+        return nextSnapshot;
+      }),
     connectDevice: () => run(() => sourceRef.current.connectDevice()),
     syncNow: () => run(() => sourceRef.current.syncNow()),
+    syncDeviceTime: () => run(() => sourceRef.current.syncDeviceTime()),
     startCalibration: () => run(() => sourceRef.current.startCalibration()),
     refreshDeviceStatus: () => run(() => sourceRef.current.refreshDeviceStatus(), false),
+    refreshLiveWeight: () => run(() => sourceRef.current.refreshLiveWeight(), false),
     saveTare: () => run(() => sourceRef.current.saveTare()),
     confirmCalibrationAmount: (amountMl: number) =>
       run(() => sourceRef.current.confirmCalibrationAmount(amountMl)),
+    resetCalibrationToDefault: () => run(() => sourceRef.current.resetCalibrationToDefault()),
     finishCalibration: () => run(() => sourceRef.current.finishCalibration()),
+    saveCupCalibration: (cupWeightTenthsG: number) =>
+      run(() => sourceRef.current.saveCupCalibration(cupWeightTenthsG)),
     addManualIntake: (input: ManualIntakeInput) =>
       run(() => sourceRef.current.addManualIntake(input)),
     deleteHistoryForDate: (dateKey: string) =>
@@ -155,7 +192,12 @@ export const useDailySipData = () => {
       run(() => sourceRef.current.deleteHistoryRange(startDateKey, endDateKey)),
     deleteAllHistory: () => run(() => sourceRef.current.deleteAllHistory()),
     renameDevice: (name: string) => run(() => sourceRef.current.renameDevice(name)),
-    removeDevice: () => run(() => sourceRef.current.removeDevice()),
+    removeDevice: () =>
+      run(async () => {
+        const nextSnapshot = await sourceRef.current.removeDevice();
+        setDiscoveredBottles([]);
+        return nextSnapshot;
+      }),
     updateSettings: (settings: DailySipSettings) =>
       run(() => sourceRef.current.updateSettings(settings))
   };

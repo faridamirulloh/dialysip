@@ -13,7 +13,8 @@ Connected modules:
 - Load cell + HX711 for weight measurement.
 - JMD0.96 OLED, assumed SSD1306-compatible 128x64 I2C.
 - RTC module, assumed DS1302-compatible.
-- microSD module over SPI.
+- 1S Li-ion/LiPo battery voltage divider using two equal-value resistors.
+- 5V charger-present digital divider using 25k and 37k resistors.
 
 ## Folder
 
@@ -64,8 +65,7 @@ The sketch directly implements:
 The sketch uses ESP32 Arduino built-in libraries for:
 
 - BLEDevice
-- SD
-- SPI
+- LittleFS
 - Wire
 - Preferences
 
@@ -99,20 +99,25 @@ External button -> GPIO2 to GND
 External pull-up for GPIO3 -> 3.3V through 10k-100k
 External pull-up for GPIO2 -> 3.3V through 10k-100k
 
+HX711:
+GPIO10 = DOUT
+GPIO20 = SCK
+
 DS1302 RTC:
 GPIO9 = DAT
 GPIO8 = CLK
 GPIO21 = RST
 
-microSD SPI:
-GPIO4 = SCK
-GPIO5 = MISO
-GPIO6 = MOSI
-GPIO7 = CS
+Battery voltage:
+GPIO4 = ADC input from equal-value divider midpoint
+Battery + -> 40k or 100k -> GPIO4 -> matching 40k or 100k -> GND
+Battery - -> GND
+Add 100nF to 1uF capacitor from GPIO4 to GND
 
-HX711:
-GPIO10 = DOUT
-GPIO20 = SCK
+Charger detect:
+GPIO6 = digital input from 25k/37k divider midpoint
+5V charger + -> 25k -> GPIO6 -> 37k -> GND
+5V charger - -> GND
 ```
 
 `GPIO2`, `GPIO8`, and `GPIO9` are ESP32-C3 strapping pins. This pin plan does not use the built-in BOOT button in firmware. Avoid holding the external button LOW during reset or power-up, and make sure the DS1302 DAT line does not pull `GPIO9` LOW during reset.
@@ -138,7 +143,7 @@ Set the BMI160 module address to `0x69` as configured in the firmware.
 - In calibration mode, hold the button for about 2 seconds to exit.
 - Intake history screens return to the main display after 5 seconds without a button press.
 - Bottle movement: BMI160 any-motion interrupt wakes the ESP32-C3, then HX711 measures bottle weight.
-- Main display shows only the remaining bottle amount in mL.
+- Main display shows the remaining bottle amount in mL and a compact battery percent indicator.
 - Deep sleep: BLE and OLED are off; BMI160 remains in low-power accelerometer mode.
 
 ## BLE Service
@@ -215,7 +220,7 @@ Records are appended to:
 Example record:
 
 ```json
-{"record_id":1024,"timestamp_utc":1780000000,"type":"drink_auto","amount_ml":85,"weight_before_g":420.0,"weight_after_g":335.0,"confidence":"normal","flags":"","battery_mv":0,"device_id":"dialysip-001","firmware_version":"0.1.0"}
+{"record_id":1024,"timestamp_utc":1780000000,"type":"drink_auto","amount_ml":85,"weight_before_g":420.0,"weight_after_g":335.0,"confidence":"normal","flags":"","battery_mv":3700,"device_id":"dialysip-001","firmware_version":"0.1.0"}
 ```
 
 ## Calibration Flow
@@ -238,13 +243,15 @@ Check these current states:
 - Deep sleep with BMI160 powered.
 - OLED on.
 - HX711 active.
-- microSD write.
 - BLE advertising.
 - BLE connected.
+- Battery divider leakage.
+- Charger detect divider leakage when 5V is connected.
 
 Remove or disable module power LEDs if they draw too much current.
 
-The current firmware leaves battery voltage reporting disabled because the simple GPIOs are reserved for wake and peripherals. Use an I2C fuel gauge later if accurate battery reporting is required.
+Battery voltage is measured on GPIO4 through an equal-value divider. A 40k/40k pair draws about 52.5 uA at 4.2V; a 100k/100k pair draws about 21 uA. Add a 100nF to 1uF capacitor from GPIO4 to GND to reduce ADC noise. The reported percent is an approximate 1S Li-ion/LiPo estimate from 3.3V to 4.2V; use `battery_mv` as the authoritative filtered value.
+Charger presence is detected on GPIO6 through a 25k/37k divider and means only that 5V input is present. The divider puts about 2.98V on GPIO6 from a 5V charger input, which is suitable for a digital HIGH while staying below 3.3V. It does not report real charging/full status from the charger IC.
 
 ## Important Limitations
 

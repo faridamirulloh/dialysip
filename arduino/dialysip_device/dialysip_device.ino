@@ -34,10 +34,8 @@ static constexpr uint8_t PIN_I2C_SCL = 1;
 static constexpr uint8_t PIN_MOTION_WAKE = 3;
 static constexpr uint8_t PIN_WAKE_BUTTON = 2;
 
-static constexpr uint8_t PIN_SD_SCK = 4;
-static constexpr uint8_t PIN_SD_MISO = 5;
-static constexpr uint8_t PIN_SD_MOSI = 6;
-static constexpr uint8_t PIN_SD_CS = 7;
+static constexpr uint8_t PIN_BATTERY_ADC = 4;
+static constexpr uint8_t PIN_CHARGER_DETECT = 6;
 
 static constexpr uint8_t PIN_HX711_DOUT = 10;
 static constexpr uint8_t PIN_HX711_SCK = 20;
@@ -49,15 +47,18 @@ static constexpr uint8_t PIN_DS1302_RST = 21;
 // Optional power-gate pins. Set to a real GPIO if you add load switches.
 static constexpr int8_t PIN_OLED_POWER = -1;
 static constexpr int8_t PIN_HX711_POWER = -1;
-static constexpr int8_t PIN_SD_POWER = -1;
 
-// Battery ADC is intentionally disabled because low-power wake inputs consume the available simple GPIOs.
-// Use an I2C fuel gauge later if you need accurate battery reporting.
-static constexpr int8_t PIN_BATTERY_ADC = -1;
+static constexpr uint8_t BATTERY_ADC_SAMPLES = 16;
+static constexpr uint16_t BATTERY_EMPTY_MV = 3300;
+static constexpr uint16_t BATTERY_FULL_MV = 4200;
+static constexpr uint8_t BATTERY_DIVIDER_RATIO = 2; // Equal-value divider, e.g. 40k/40k or 100k/100k.
+static constexpr uint8_t BATTERY_FILTER_NUMERATOR = 1;
+static constexpr uint8_t BATTERY_FILTER_DENOMINATOR = 8;
+static constexpr uint16_t BATTERY_PERCENT_UPDATE_MV = 20;
 
 // -------------------- Device settings --------------------
 
-static constexpr char DEVICE_NAME[] = "DialySip";
+static constexpr char DEVICE_NAME[] = "DialySip-003";
 static constexpr char FIRMWARE_VERSION[] = "0.1.0";
 static constexpr char LOG_FILE[] = "/dialysip.jsonl";
 static constexpr char LOG_TMP_FILE[] = "/dialysip.tmp";
@@ -86,7 +87,6 @@ static constexpr uint8_t UNSTABLE_WEIGHT_WARNING_COUNT = 2;
 static constexpr float BOTTLE_REMOVED_THRESHOLD_G = -100.0f;
 static constexpr uint8_t BOTTLE_REMOVED_STABLE_COUNT_LIMIT = 3;
 static constexpr uint32_t DRINK_CONFIRMATION_DISPLAY_MS = 5000;
-static constexpr uint32_t SLEEP_AFTER_STABLE_READ_MS = 10000;
 static constexpr uint32_t LIVE_WEIGHT_STABLE_MS = 2000;
 static constexpr uint32_t MAIN_DISPLAY_LIVE_UPDATE_MS = 100;
 static constexpr uint32_t CALIBRATION_DISPLAY_INTERVAL_MS = 800;
@@ -94,9 +94,12 @@ static constexpr uint16_t PRE_SLEEP_TOTAL_DISPLAY_MS = 2000;
 static constexpr uint16_t DEFAULT_DAILY_LIMIT_ML = 1000;
 static constexpr uint16_t DEFAULT_DRINK_THRESHOLD_ML = 10;
 static constexpr uint16_t DEFAULT_REFILL_THRESHOLD_ML = 10;
+static constexpr uint16_t DEFAULT_CUP_WEIGHT_TENTHS_G = 525;
+static constexpr uint16_t DEFAULT_CUP_TOLERANCE_TENTHS_G = 30;
 static constexpr uint8_t DEFAULT_WARNING_PERCENT = 80;
 static constexpr uint16_t DEFAULT_OLED_TIMEOUT_SECONDS = 15;
 static constexpr uint16_t DEFAULT_BLE_WINDOW_SECONDS = 60;
+static constexpr uint16_t DEFAULT_STABLE_SAVE_SECONDS = 60;
 static constexpr uint16_t DEFAULT_HISTORY_RETENTION_DAYS = 10;
 static constexpr int16_t DEFAULT_TIMEZONE_OFFSET_MINUTES = 420; // GMT+7 fallback when the app does not send a phone offset.
 static constexpr uint16_t BUTTON_DEBOUNCE_MS = 40;
@@ -108,7 +111,7 @@ static constexpr uint16_t RESET_SAVED_DATA_VIEW_TIMEOUT_MS = 5000;
 static constexpr uint8_t SYNC_BUTTON_CLICKS = 3;
 static constexpr uint8_t CALIBRATION_BUTTON_CLICKS = 5;
 static constexpr uint8_t RESET_DAILY_BUTTON_CLICKS = 7;
-static constexpr uint16_t CALIBRATION_KNOWN_WEIGHT_G = 250;
+static constexpr uint16_t CALIBRATION_KNOWN_WEIGHT_G = 600;
 static constexpr uint16_t CALIBRATION_SETTLE_DELAY_MS = 3000;
 static constexpr uint32_t APP_HEARTBEAT_INTERVAL_MS = 10000;
 static constexpr uint8_t APP_HEARTBEAT_MISSED_LIMIT = 3;

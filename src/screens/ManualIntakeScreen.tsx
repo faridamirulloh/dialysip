@@ -1,5 +1,7 @@
+import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, Text, TextInput, View } from "react-native";
 import { intakeCategories } from "../constants/intakeCategories";
 import type { DailySipSnapshot, IntakeCategory, ManualIntakeInput } from "../data/types";
 import type { AppCopy } from "../i18n";
@@ -21,6 +23,7 @@ export function ManualIntakeScreen({ snapshot, copy, onSave }: ManualIntakeScree
   const [amountText, setAmountText] = useState("120");
   const [category, setCategory] = useState<IntakeCategory>("Mineral water");
   const [selectedDate, setSelectedDate] = useState(() => new Date());
+  const [datePickerVisible, setDatePickerVisible] = useState(false);
   const [timeText, setTimeText] = useState(formatTimeKey(new Date()));
   const [note, setNote] = useState("");
   const amountMl = Number.parseInt(amountText, 10) || 0;
@@ -30,11 +33,19 @@ export function ManualIntakeScreen({ snapshot, copy, onSave }: ManualIntakeScree
   const isToday = normalizedDateText === formatDateKey(new Date());
   const totalAfterSave = isToday ? snapshot.summary.totalMl + amountMl : snapshot.summary.totalMl;
   const language = snapshot.settings.language;
-  const changeDateByDays = (days: number) => {
-    setSelectedDate((current) => addDays(current, days));
-  };
   const changeTimeByMinutes = (minutes: number) => {
     setTimeText((current) => formatTimeKey(addMinutes(parseTimeKey(current), minutes)));
+  };
+  const handleDateChange = (event: DateTimePickerEvent, date?: Date) => {
+    if (Platform.OS !== "ios") {
+      setDatePickerVisible(false);
+    }
+
+    if (event.type === "dismissed" || !date) {
+      return;
+    }
+
+    setSelectedDate(date);
   };
 
   return (
@@ -68,11 +79,24 @@ export function ManualIntakeScreen({ snapshot, copy, onSave }: ManualIntakeScree
       </View>
       <View style={styles.datePanel}>
         <Text style={styles.inputLabel}>{copy.datePicker}</Text>
-        <View style={styles.pickerControlRow}>
-          <IconButton icon="chevron-back-outline" accessibilityLabel={`${copy.previous} ${copy.date}`} onPress={() => changeDateByDays(-1)} />
-          <Text style={styles.pickerValue}>{normalizedDateText}</Text>
-          <IconButton icon="chevron-forward-outline" accessibilityLabel={`${copy.next} ${copy.date}`} onPress={() => changeDateByDays(1)} />
-        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={copy.datePicker}
+          onPress={() => setDatePickerVisible(true)}
+          style={({ pressed }) => [styles.datePickerButton, pressed && styles.datePickerButtonPressed]}
+        >
+          <Text style={styles.datePickerButtonText}>{normalizedDateText}</Text>
+          <Ionicons name="calendar-outline" size={18} color={palette.accent} />
+        </Pressable>
+        {datePickerVisible && (
+          <DateTimePicker
+            value={selectedDate}
+            mode="date"
+            display={Platform.OS === "ios" ? "inline" : "default"}
+            onChange={handleDateChange}
+            style={styles.datePickerInline}
+          />
+        )}
         <Text style={styles.inputLabel}>{copy.timePicker}</Text>
         <View style={styles.pickerControlRow}>
           <IconButton icon="remove-outline" accessibilityLabel={`${copy.decrease} ${copy.time}`} onPress={() => changeTimeByMinutes(-15)} />
@@ -148,12 +172,6 @@ const parseTimeKey = (timeKey: string) => {
   const [hours, minutes] = timeKey.split(":").map(Number);
   fallback.setHours(hours, minutes, 0, 0);
   return fallback;
-};
-
-const addDays = (date: Date, days: number) => {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
 };
 
 const addMinutes = (date: Date, minutes: number) => {

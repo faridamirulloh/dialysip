@@ -1,7 +1,7 @@
 import { Platform } from "react-native";
 import type { BleManager, Device, Subscription } from "react-native-ble-plx";
 import type { BleConnectionSnapshot, BleSyncResult, PendingDeviceSettings, SyncedDeviceRecord } from "../data/syncTypes";
-import type { BleActivity, BleLogEntry } from "../data/types";
+import type { BleActivity, BleLogEntry, DiscoveredBottle } from "../data/types";
 import { decodeJsonBase64, encodeJsonBase64 } from "./base64";
 import { requestBlePermissions } from "./blePermissions";
 import {
@@ -37,6 +37,7 @@ export class DailySipBleClient {
   private logListener?: (entry: BleLogEntry) => void;
   private logSequence = 0;
   private collectingHistoryNotifications = false;
+  private discoveredDevices = new Map<string, Device>();
   private appActive = false;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
 
@@ -66,12 +67,79 @@ export class DailySipBleClient {
     const existingStatus = await this.readConnectedStatus(expectedDeviceId);
     if (existingStatus) {
       await this.watchDeviceDisconnect();
-      await this.writeTimeSync();
       this.startHeartbeat();
       return { status: existingStatus };
     }
 
     const bottle = await this.findBottle();
+    return this.connectFoundBottle(bottle, expectedDeviceId);
+  }
+
+  async scanBottles(): Promise<DiscoveredBottle[]> {
+    const manager = await this.getManager();
+    const permissionResult = await requestBlePermissions();
+
+    if (!permissionResult.granted) {
+      throw new Error(permissionResult.reason ?? "Bluetooth permission was not granted.");
+    }
+
+    const found = new Map<string, DiscoveredBottle>();
+    const addBottle = (device: Device, isConnected: boolean, force = false) => {
+      if (!force && !isDailySipDevice(device)) {
+        return;
+      }
+
+      this.discoveredDevices.set(device.id, device);
+      found.set(device.id, toDiscoveredBottle(device, isConnected));
+    };
+
+    const connectedBottles = await this.findConnectedBottles(manager);
+    connectedBottles.forEach((device) => addBottle(device, true, true));
+
+    return new Promise<DiscoveredBottle[]>((resolve, reject) => {
+      let settled = false;
+      const finish = (callback: () => void) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        manager.stopDeviceScan();
+        clearTimeout(timeoutId);
+        callback();
+      };
+      const timeoutId = setTimeout(() => {
+        finish(() => resolve(sortDiscoveredBottles([...found.values()])));
+      }, SCAN_TIMEOUT_MS);
+
+      manager.startDeviceScan(null, { allowDuplicates: false }, (error, scannedDevice) => {
+        if (error) {
+          finish(() => reject(error));
+          return;
+        }
+
+        if (!scannedDevice) {
+          return;
+        }
+
+        addBottle(scannedDevice, false);
+      });
+    });
+  }
+
+  async connectToScannedBottle(scanId: string): Promise<BleConnectionSnapshot> {
+    if (this.connectedDevice && this.connectedDevice.id !== scanId) {
+      await this.disconnect();
+    }
+
+    const bottle = await this.findBottleByScanId(scanId);
+    return this.connectFoundBottle(bottle);
+  }
+
+  private async connectFoundBottle(
+    bottle: FoundBottle,
+    expectedDeviceId?: string
+  ): Promise<BleConnectionSnapshot> {
     this.connectedDevice = bottle.isConnected
       ? bottle.device
       : await bottle.device.connect({ timeout: CONNECT_TIMEOUT_MS });
@@ -167,8 +235,44 @@ export class DailySipBleClient {
     return this.readStatus();
   }
 
+  async syncDeviceTime(expectedDeviceId?: string) {
+    const existingStatus = await this.readConnectedStatus(expectedDeviceId);
+    if (!existingStatus) {
+      const connection = await this.connectToBottle(expectedDeviceId);
+      return connection.status;
+    }
+
+    await this.watchDeviceDisconnect();
+    await this.writeTimeSync();
+    this.startHeartbeat();
+    return this.readStatus();
+  }
+
   async readConnectedDeviceStatus(expectedDeviceId?: string) {
     return this.readConnectedStatus(expectedDeviceId);
+  }
+
+  async writeSettingsIfConnected(settings: PendingDeviceSettings) {
+    if (!this.connectedDevice) {
+      return false;
+    }
+
+    try {
+      const isConnected = await this.connectedDevice.isConnected();
+      if (!isConnected) {
+        this.connectedDevice = undefined;
+        this.stopHeartbeat();
+        return false;
+      }
+
+      this.connectedDevice = await this.connectedDevice.discoverAllServicesAndCharacteristics();
+      await this.writeSettings(settings);
+      return true;
+    } catch {
+      this.connectedDevice = undefined;
+      this.stopHeartbeat();
+      return false;
+    }
   }
 
   async monitorLiveRecords(
@@ -272,12 +376,56 @@ export class DailySipBleClient {
   }
 
   private async findConnectedBottle(manager: BleManager): Promise<Device | undefined> {
+    const bottles = await this.findConnectedBottles(manager);
+    return bottles[0];
+  }
+
+  private async findConnectedBottles(manager: BleManager): Promise<Device[]> {
     try {
       const devices = await manager.connectedDevices([dailySipBleContract.serviceUuid]);
-      return devices.find(isDailySipDevice) ?? devices[0];
+      const dailySipDevices = devices.filter(isDailySipDevice);
+      return dailySipDevices.length > 0 ? dailySipDevices : devices;
     } catch {
-      return undefined;
+      return [];
     }
+  }
+
+  private async findBottleByScanId(scanId: string): Promise<FoundBottle> {
+    const manager = await this.getManager();
+    const permissionResult = await requestBlePermissions();
+
+    if (!permissionResult.granted) {
+      throw new Error(permissionResult.reason ?? "Bluetooth permission was not granted.");
+    }
+
+    if (this.connectedDevice?.id === scanId) {
+      const isConnected = await this.connectedDevice.isConnected();
+      if (isConnected) {
+        return { device: this.connectedDevice, isConnected: true };
+      }
+    }
+
+    const connectedBottle = (await this.findConnectedBottles(manager)).find((device) => device.id === scanId);
+    if (connectedBottle) {
+      return { device: connectedBottle, isConnected: true };
+    }
+
+    const cachedBottle = this.discoveredDevices.get(scanId);
+    if (cachedBottle) {
+      return { device: cachedBottle, isConnected: false };
+    }
+
+    try {
+      const devices = await manager.devices([scanId]);
+      const device = devices[0];
+      if (device && isDailySipDevice(device)) {
+        return { device, isConnected: false };
+      }
+    } catch {
+      // Fall through to the user-facing error below.
+    }
+
+    throw new Error("Selected DialySip bottle is no longer available. Scan again.");
   }
 
   private async ensureConnected(): Promise<Device> {
@@ -648,6 +796,22 @@ interface FoundBottle {
   device: Device;
   isConnected: boolean;
 }
+
+const toDiscoveredBottle = (device: Device, isConnected: boolean): DiscoveredBottle => ({
+  scanId: device.id,
+  name: device.name ?? device.localName ?? dailySipBleContract.advertisedName,
+  rssi: typeof device.rssi === "number" ? device.rssi : null,
+  isConnected
+});
+
+const sortDiscoveredBottles = (bottles: DiscoveredBottle[]) =>
+  bottles.sort((left, right) => {
+    if (left.isConnected !== right.isConnected) {
+      return left.isConnected ? -1 : 1;
+    }
+
+    return (right.rssi ?? -999) - (left.rssi ?? -999);
+  });
 
 const characteristicNames: Record<string, string> = {
   [dailySipBleContract.characteristics.status]: "status",

@@ -52,6 +52,8 @@ void serviceResetSavedDataTimeout();
 bool buttonInteractionActive();
 void updateMainDisplayLive();
 void updateCalibrationLiveWeight(bool notify);
+void refreshScaleWeight();
+void resetCalibrationToDefault();
 void handleTimeSync(const String &payload);
 void handleSettingsWrite(const String &payload);
 void handleAckWrite(const String &payload);
